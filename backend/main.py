@@ -23,9 +23,11 @@ import uvicorn
 try:
     from backend.hybrid_search import HybridSearcher
     from backend.lawyer_extractor import extract_lawyers_from_search_results
+    from backend.lawyer_enrichment import enrich_lawyers_with_emails
 except ImportError:
     from hybrid_search import HybridSearcher
     from lawyer_extractor import extract_lawyers_from_search_results
+    from lawyer_enrichment import enrich_lawyers_with_emails
 
 # Global searcher instance
 searcher: Optional[HybridSearcher] = None
@@ -96,6 +98,9 @@ def search_legal(request: SearchRequest):
             query=request.query,
             search_results=results
         )
+        
+        # 2.5. Enrich Lawyers with Emails (Apollo + Heuristics)
+        all_extracted_lawyers = enrich_lawyers_with_emails(all_extracted_lawyers)
         
         # 3. Attach extracted lawyers back to their respective case documents
         # We match them by 'document_id' or 'citation'
