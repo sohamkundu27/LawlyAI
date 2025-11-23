@@ -3,6 +3,11 @@ huggingface-hub>=0.16.0
 sentence-transformers>=2.2.2
 numpy>=1.24.0
 tqdm>=4.65.0
+fastapi
+uvicorn
+faiss-cpu
+rank-bm25
+pydantic
 langchain>=0.1.0
 langchain-google-genai>=1.0.0
 langchain-core>=0.1.0
