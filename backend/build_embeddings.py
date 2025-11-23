@@ -75,7 +75,8 @@ def build_embeddings(
     batch_size: int,
     output_dir: str,
     push_to_hub: bool,
-    new_dataset_id: str = None
+    new_dataset_id: str = None,
+    limit: int = None
 ) -> None:
     """
     Main function to build embeddings for a dataset.
@@ -89,6 +90,7 @@ def build_embeddings(
         output_dir: Directory to save the vectorized dataset
         push_to_hub: Whether to push the dataset to Hugging Face Hub
         new_dataset_id: New dataset ID for HF Hub (if None, uses dataset_id + "-embeddings")
+        limit: Limit the number of rows to process
     """
     print("=" * 80)
     print("Building Vectorized Dataset")
@@ -122,6 +124,13 @@ def build_embeddings(
             dataset = full_dataset
     
     print(f"Dataset loaded: {len(dataset)} rows")
+    
+    # Apply limit if specified
+    if limit is not None and len(dataset) > limit:
+        print(f"\nLimiting dataset to first {limit} rows...")
+        dataset = dataset.select(range(limit))
+        print(f"Dataset size after limiting: {len(dataset)} rows")
+    
     print(f"Columns: {', '.join(dataset.column_names)}")
     
     # Validate text column exists
@@ -189,99 +198,36 @@ def build_embeddings(
 
 
 def main():
-    """Main entry point with CLI argument parsing."""
-    parser = argparse.ArgumentParser(
-        description="Build vectorized embeddings for a Hugging Face dataset",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Basic usage
-  python build_embeddings.py --dataset-id HFforLegal/case-law --split train
+    """Main entry point."""
+    # Hardcoded configuration for ease of use
+    dataset_id = "HFforLegal/case-law"
+    split = "us"
+    limit = 100000
+    
+    # Other defaults
+    model_name = "sentence-transformers/all-mpnet-base-v2"
+    text_column = "document"
+    batch_size = 64
+    output_dir = "./vectorized_dataset"
+    push_to_hub = False
+    new_dataset_id = None
 
-  # Custom model and output directory
-  python build_embeddings.py \\
-    --dataset-id HFforLegal/case-law \\
-    --split train \\
-    --model-name sentence-transformers/all-MiniLM-L6-v2 \\
-    --output-dir ./my_embeddings
+    print(f"Running with hardcoded configuration:")
+    print(f"  Dataset: {dataset_id}")
+    print(f"  Split: {split}")
+    print(f"  Limit: {limit}")
 
-  # Push to Hugging Face Hub
-  python build_embeddings.py \\
-    --dataset-id HFforLegal/case-law \\
-    --split train \\
-    --push-to-hub True \\
-    --new-dataset-id my-username/case-law-embeddings
-        """
-    )
-    
-    parser.add_argument(
-        "--dataset-id",
-        type=str,
-        required=True,
-        help="Hugging Face dataset ID (e.g., 'HFforLegal/case-law')"
-    )
-    
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Dataset split name (default: 'train')"
-    )
-    
-    parser.add_argument(
-        "--model-name",
-        type=str,
-        default="sentence-transformers/all-mpnet-base-v2",
-        help="SentenceTransformer model name (default: 'sentence-transformers/all-mpnet-base-v2')"
-    )
-    
-    parser.add_argument(
-        "--text-column",
-        type=str,
-        default="document",
-        help="Column name containing text to embed (default: 'document')"
-    )
-    
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Batch size for processing (default: 64)"
-    )
-    
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="./vectorized_dataset",
-        help="Directory to save the vectorized dataset (default: './vectorized_dataset')"
-    )
-    
-    parser.add_argument(
-        "--push-to-hub",
-        type=lambda x: x.lower() in ['true', '1', 'yes', 'y'],
-        default=False,
-        help="Whether to push the dataset to Hugging Face Hub (default: False)"
-    )
-    
-    parser.add_argument(
-        "--new-dataset-id",
-        type=str,
-        default=None,
-        help="New dataset ID for HF Hub (if None, uses dataset_id + '-embeddings')"
-    )
-    
-    args = parser.parse_args()
-    
     # Run the main function
     build_embeddings(
-        dataset_id=args.dataset_id,
-        split=args.split,
-        model_name=args.model_name,
-        text_column=args.text_column,
-        batch_size=args.batch_size,
-        output_dir=args.output_dir,
-        push_to_hub=args.push_to_hub,
-        new_dataset_id=args.new_dataset_id
+        dataset_id=dataset_id,
+        split=split,
+        model_name=model_name,
+        text_column=text_column,
+        batch_size=batch_size,
+        output_dir=output_dir,
+        push_to_hub=push_to_hub,
+        new_dataset_id=new_dataset_id,
+        limit=limit
     )
 
 
