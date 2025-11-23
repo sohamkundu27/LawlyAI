@@ -52,8 +52,12 @@ def send_email_tool(
         sender = sender_email or SENDER_EMAIL
         password = SENDER_PASSWORD
         
-        if sender == "your-email@gmail.com" or password == "your-app-password":
-            return "❌ Error: Please configure SENDER_EMAIL and SENDER_PASSWORD environment variables"
+        # Validate credentials are configured
+        if sender == "your-email@gmail.com" or not sender or sender.strip() == "":
+            return "❌ Error: SENDER_EMAIL not configured. Please set SENDER_EMAIL in your .env file."
+        
+        if password == "your-app-password" or not password or password.strip() == "":
+            return "❌ Error: SENDER_PASSWORD not configured. Please set SENDER_PASSWORD in your .env file."
         
         # Create message
         message = MIMEMultipart()
@@ -65,35 +69,73 @@ def send_email_tool(
         message.attach(MIMEText(body, "plain"))
         
         # Create SMTP session
+        print(f"[DEBUG] Connecting to {SMTP_SERVER}:{SMTP_PORT}")
+        print(f"[DEBUG] Authenticating as: {sender}")
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()  # Enable encryption
+        print(f"[DEBUG] Attempting login...")
         server.login(sender, password)
+        print(f"[DEBUG] Login successful!")
         
         # Send email
         text = message.as_string()
+        print(f"[DEBUG] Sending email to {recipient_email}...")
         server.sendmail(sender, recipient_email, text)
         server.quit()
+        print(f"[DEBUG] Email sent successfully!")
         
         return f"✅ Email sent successfully to {recipient_email} with subject: '{subject}'"
         
     except smtplib.SMTPAuthenticationError as e:
         error_msg = str(e)
-        if "Application-specific password" in error_msg or "534" in error_msg:
-            return """❌ Gmail requires an App-Specific Password!
-            
-To fix this:
-1. Go to https://myaccount.google.com/apppasswords
-2. Sign in to your Google account
-3. Select "Mail" and "Other (Custom name)"
-4. Enter "Email Agent" as the name
-5. Click "Generate"
-6. Copy the 16-character password (no spaces)
-7. Update your .env file: SENDER_PASSWORD=the-16-char-password
+        error_code = getattr(e, 'smtp_code', None)
+        print(f"[ERROR] SMTP Authentication Error: {error_msg} (Code: {error_code})")
+        
+        if "Application-specific password" in error_msg or "534" in str(error_code) or "535" in str(error_code):
+            return """❌ Gmail Authentication Error - App-Specific Password Required!
 
-Note: You need 2-Step Verification enabled first.
-If you don't have it, enable it at: https://myaccount.google.com/security"""
-        return f"❌ Authentication error: {str(e)}"
+Gmail requires an App-Specific Password for third-party applications.
+
+To fix this:
+1. Enable 2-Step Verification (if not already enabled):
+   https://myaccount.google.com/security
+
+2. Generate an App-Specific Password:
+   https://myaccount.google.com/apppasswords
+   - Sign in to your Google account
+   - Select "Mail" and "Other (Custom name)"
+   - Enter "Email Agent" as the name
+   - Click "Generate"
+   - Copy the 16-character password (no spaces)
+
+3. Update your .env file:
+   SENDER_EMAIL=your-email@gmail.com
+   SENDER_PASSWORD=xxxx-xxxx-xxxx-xxxx
+
+4. Restart the backend server
+
+Note: Do NOT use your regular Gmail password. Only use the app-specific password."""
+        
+        return f"""❌ Authentication Error: {error_msg}
+
+Common causes:
+- Wrong password (make sure you're using an App-Specific Password for Gmail)
+- 2-Step Verification not enabled
+- Account security settings blocking access
+- Incorrect email address
+
+Check your .env file has:
+SENDER_EMAIL=your-email@gmail.com
+SENDER_PASSWORD=your-app-specific-password"""
+    
+    except smtplib.SMTPException as e:
+        print(f"[ERROR] SMTP Error: {str(e)}")
+        return f"❌ SMTP Error: {str(e)}"
+    
     except Exception as e:
+        print(f"[ERROR] Unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return f"❌ Error sending email: {str(e)}"
 
 
@@ -337,6 +379,8 @@ Best regards"""
         """
         Generate a reply to a lawyer's email, maintaining conversation context.
         
+        IMPORTANT: You are responding AS THE CLIENT to the lawyer's response.
+        
         Args:
             lawyer_email: The lawyer's email address
             incoming_email: Dictionary with incoming email details
@@ -348,33 +392,66 @@ Best regards"""
         # Update conversation tracking
         self.update_lawyer_conversation(lawyer_email, incoming_email)
         
-        # Build context for reply generation
-        context_parts = []
+        # Get the lawyer's actual response (the most recent email from them)
+        lawyer_response = incoming_email.get('body', '')
+        lawyer_subject = incoming_email.get('subject', 'No subject')
         
-        if conversation_context:
-            context_parts.append(f"Conversation history:\n{conversation_context}\n")
-        
-        # Check if this is a first response
-        conv_status = self.get_lawyer_conversation_status(lawyer_email)
-        if conv_status and conv_status.get('message_count', 0) == 1:
-            context_parts.append("This is the lawyer's first response to your initial inquiry.")
-        
-        context_parts.append(f"\nIncoming email from {lawyer_email}:")
-        context_parts.append(f"Subject: {incoming_email.get('subject', 'No subject')}")
-        context_parts.append(f"Body:\n{incoming_email.get('body', '')}")
-        
-        context_parts.append("\n\nGenerate a professional, helpful reply that:")
-        context_parts.append("- Acknowledges their response")
-        context_parts.append("- Answers any questions they asked")
-        context_parts.append("- Asks follow-up questions if appropriate")
-        context_parts.append("- Maintains a professional but friendly tone")
-        context_parts.append("- Keeps the conversation moving forward")
-        
-        prompt = "\n".join(context_parts)
-        
+        # Build a focused prompt that makes it clear we're the CLIENT responding to the LAWYER
+        prompt = f"""You are an AI assistant helping a CLIENT respond to a LAWYER's email.
+
+IMPORTANT CONTEXT:
+- You are responding AS THE CLIENT (the person who initially reached out for legal services)
+- The lawyer has just sent you a response
+- You need to respond TO the lawyer's message, not as if you are the lawyer
+
+THE LAWYER'S RESPONSE:
+Subject: {lawyer_subject}
+
+{lawyer_response}
+
+YOUR TASK:
+Generate a reply email FROM THE CLIENT TO THE LAWYER that:
+1. Acknowledges the lawyer's response
+2. Answers any questions the lawyer asked
+3. Provides any additional information the lawyer requested
+4. Asks follow-up questions if needed (about fees, availability, next steps, etc.)
+5. Maintains a professional, friendly, and client-appropriate tone
+6. Is concise but complete
+
+IMPORTANT:
+- Do NOT write as if you are the lawyer
+- Do NOT provide legal services information
+- Do NOT use phrases like "our firm" or "we specialize in"
+- You are the CLIENT seeking legal help, responding to the lawyer's offer
+- Keep it natural and conversational, as a real client would respond
+
+Generate ONLY the email body text (no subject line, no signatures, just the message content):"""
+
         try:
             result = self.invoke(prompt)
-            return result.get('output', '').strip()
+            reply = result.get('output', '').strip()
+            
+            # Clean up the reply - remove any meta-commentary or instructions
+            # Sometimes the model adds extra text
+            lines = reply.split('\n')
+            cleaned_lines = []
+            skip_next = False
+            for line in lines:
+                # Skip lines that look like instructions or meta-commentary
+                if any(phrase in line.lower() for phrase in [
+                    'here is', 'here\'s', 'i\'ve generated', 'email body:', 
+                    'reply:', 'response:', '---', '===', 'subject:'
+                ]):
+                    continue
+                cleaned_lines.append(line)
+            
+            cleaned_reply = '\n'.join(cleaned_lines).strip()
+            
+            # If the cleaned reply is too short, use the original
+            if len(cleaned_reply) < 50:
+                cleaned_reply = reply.strip()
+            
+            return cleaned_reply
         except Exception as e:
             print(f"Error generating reply: {str(e)}")
             return ""

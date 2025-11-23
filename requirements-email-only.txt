@@ -1,0 +1,10 @@
+# Minimal requirements for email service only (no hybrid search)
+fastapi
+uvicorn
+pydantic
+langchain>=0.1.0
+langchain-google-genai>=1.0.0
+langchain-core>=0.1.0
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
+

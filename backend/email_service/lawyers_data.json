@@ -1,7 +1,7 @@
 {
-  "arnavmohanty123@gmail.com": {
-    "lawyer_name": "Arnav Mohanty",
-    "lawyer_email": "arnavmohanty123@gmail.com",
+  "jaybalu06@gmail.com": {
+    "lawyer_name": "Jayanth Balu",
+    "lawyer_email": "jaybalu06@gmail.com",
     "firm_name": "",
     "hourly_rate": null,
     "flat_fee": null,
@@ -10,35 +10,16 @@
     "estimated_total": null,
     "payment_plan": "",
     "experience_years": null,
-    "case_types": [],
+    "case_types": [
+      "personal injury"
+    ],
     "availability": "",
     "response_time": "",
     "terms": "",
-    "notes": "I would be happy to speak with you.\r\n\r\nOn Sat, Nov 22, 2025 at 8:40\u202fPM <lawyerfinder9@gmail.com> wrote:\r\n\r\n> Hello,\r\n>\r\n> I hope this email finds you well. I am reaching out to inquire about your\r\n> legal services and would appreciate the opportunity to discuss my legal\r\n> needs with you.\r\n>\r\n> Could you please provide information about:\r\n> - Your areas of practice\r\n> - Your fee structure (hourly rate, flat fee, or contingency)\r\n> - Your availability for a consultation\r\n> - Any initial retainer ",
-    "first_contact_date": "2025-11-22T20:41:51.196273",
-    "last_contact_date": "2025-11-22T20:41:51.196273",
-    "email_count": 1,
-    "thread_id": ""
-  },
-  "sohamkundu2704@gmail.com": {
-    "lawyer_name": "Soham Kundu",
-    "lawyer_email": "sohamkundu2704@gmail.com",
-    "firm_name": "",
-    "hourly_rate": null,
-    "flat_fee": null,
-    "contingency_rate": 33.0,
-    "retainer_amount": null,
-    "estimated_total": null,
-    "payment_plan": "",
-    "experience_years": null,
-    "case_types": [],
-    "availability": "",
-    "response_time": "",
-    "terms": "",
-    "notes": "Hi baby\r\n\r\nOn Sat, Nov 22, 2025 at 8:40\u202fPM <lawyerfinder9@gmail.com> wrote:\r\n\r\n> Hello,\r\n>\r\n> I hope this email finds you well. I am reaching out to inquire about your\r\n> legal services and would appreciate the opportunity to discuss my legal\r\n> needs with you.\r\n>\r\n> Could you please provide information about:\r\n> - Your areas of practice\r\n> - Your fee structure (hourly rate, flat fee, or contingency)\r\n> - Your availability for a consultation\r\n> - Any initial retainer requirements\r\n>\r\n> Thank you",
-    "first_contact_date": "2025-11-22T20:43:05.655316",
-    "last_contact_date": "2025-11-22T20:43:05.655316",
-    "email_count": 1,
+    "notes": "Yes, I can help you.\r\n\r\nOn Sat, Nov 22, 2025 at 11:45\u202fPM <lawyerfinder9@gmail.com> wrote:\r\n\r\n> Hello,\r\n>\r\n> I hope this email finds you well. I am reaching out to inquire about your\r\n> legal services and would appreciate the opportunity to discuss my legal\r\n> needs with you.\r\n>\r\n> Client Situation:\r\n> i was in a car accident pls help me.\r\n>\r\n> Could you please provide information about:\r\n> - Your areas of practice\r\n> - Your fee structure (hourly rate, flat fee, or contingency)\r\n> - Your availabi",
+    "first_contact_date": "2025-11-22T22:03:06.019689",
+    "last_contact_date": "2025-11-22T23:48:35.362221",
+    "email_count": 5,
     "thread_id": ""
   }
 }

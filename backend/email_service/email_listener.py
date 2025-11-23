@@ -13,10 +13,11 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
-from email_agent import create_email_agent, send_email_tool
-from email_conversation_manager import ConversationManager, extract_email_headers
-from email_filters import EmailFilter
-from lawyer_tracker import LawyerTracker
+from backend.email_service.email_agent import create_email_agent, send_email_tool
+from backend.email_service.conversation_manager_db import ConversationManagerDB as ConversationManager
+from backend.email_service.email_conversation_manager import extract_email_headers  # Keep this utility function
+from backend.email_service.email_filters import EmailFilter
+from backend.email_service.lawyer_tracker_db import LawyerTrackerDB as LawyerTracker
 
 load_dotenv()
 
@@ -31,27 +32,41 @@ PROCESSED_EMAILS_FILE = "processed_emails.json"
 
 
 def load_processed_emails() -> set:
-    """Load set of processed email UIDs."""
-    if os.path.exists(PROCESSED_EMAILS_FILE):
-        try:
-            with open(PROCESSED_EMAILS_FILE, 'r') as f:
-                data = json.load(f)
-                return set(data.get('processed_uids', []))
-        except:
-            return set()
-    return set()
+    """Load set of processed email UIDs from database."""
+    from backend.email_service.database import ProcessedEmail, get_db_session
+    
+    db = get_db_session()
+    try:
+        processed = db.query(ProcessedEmail).all()
+        return set(p.uid for p in processed)
+    finally:
+        db.close()
 
 
 def save_processed_email(uid: str):
-    """Save processed email UID."""
-    processed = load_processed_emails()
-    processed.add(uid)
+    """Save processed email UID to database."""
+    from backend.email_service.database import ProcessedEmail, get_db_session
     
-    # Keep only last 1000 UIDs to prevent file from growing too large
-    processed = set(list(processed)[-1000:])
-    
-    with open(PROCESSED_EMAILS_FILE, 'w') as f:
-        json.dump({'processed_uids': list(processed)}, f)
+    db = get_db_session()
+    try:
+        # Check if already exists
+        existing = db.query(ProcessedEmail).filter(ProcessedEmail.uid == uid).first()
+        if not existing:
+            processed = ProcessedEmail(uid=uid)
+            db.add(processed)
+            db.commit()
+        
+        # Clean up old entries (keep last 1000)
+        all_processed = db.query(ProcessedEmail).order_by(ProcessedEmail.processed_at.desc()).all()
+        if len(all_processed) > 1000:
+            for old_entry in all_processed[1000:]:
+                db.delete(old_entry)
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error saving processed email: {e}")
+    finally:
+        db.close()
 
 
 def decode_mime_words(s):
@@ -194,7 +209,7 @@ def generate_reply(agent, original_email: Dict, conversation_manager: Conversati
     Returns:
         Reply text or None if no reply should be sent
     """
-    # Add email to conversation and get thread context
+    # Get thread ID (email should already be saved, but add_email is idempotent with duplicate checking)
     thread_id = conversation_manager.add_email(original_email)
     conversation_context = conversation_manager.get_conversation_context(thread_id)
     
@@ -203,15 +218,19 @@ def generate_reply(agent, original_email: Dict, conversation_manager: Conversati
     # Check if this is from a tracked lawyer
     if hasattr(agent, 'is_lawyer_email') and agent.is_lawyer_email(from_email):
         # Use lawyer-specific reply generation
+        # Don't pass full conversation context - only use the lawyer's actual response
+        # This prevents the AI from getting confused about roles
         try:
             reply = agent.generate_lawyer_reply(
                 lawyer_email=from_email,
                 incoming_email=original_email,
-                conversation_context=conversation_context
+                conversation_context=None  # Don't pass context - focus only on lawyer's response
             )
             return reply if reply else None
         except Exception as e:
             print(f"[ERROR] Failed to generate lawyer reply: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Fall through to regular reply generation
     
     # Regular reply generation for non-lawyer emails or fallback
@@ -257,8 +276,8 @@ Generate your response now:"""
         return None
 
 
-def send_reply(original_email: Dict, reply_text: str) -> bool:
-    """Send a reply email."""
+def send_reply(original_email: Dict, reply_text: str, conversation_manager=None) -> bool:
+    """Send a reply email and save it to conversation history."""
     try:
         # Create reply subject
         subject = original_email['subject']
@@ -272,19 +291,41 @@ def send_reply(original_email: Dict, reply_text: str) -> bool:
             'body': reply_text
         })
         
-        return "successfully" in result.lower()
+        success = "successfully" in result.lower()
+        
+        # Save the sent reply to conversation history
+        if success and conversation_manager:
+            try:
+                reply_email_data = {
+                    'from': SENDER_EMAIL,
+                    'to': original_email['from'],
+                    'subject': subject,
+                    'body': reply_text,
+                    'date': datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z'),
+                    'uid': '',  # Sent emails don't have UIDs
+                    'message_id': '',
+                    'in_reply_to': original_email.get('message_id', ''),
+                    'references': original_email.get('message_id', '')
+                }
+                conversation_manager.add_email(reply_email_data)
+            except Exception as e:
+                print(f"[WARNING] Failed to save reply to conversation history: {str(e)}")
+        
+        return success
         
     except Exception as e:
         print(f"[ERROR] Failed to send reply: {str(e)}")
         return False
 
 
-def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
+def process_emails(agent, conversation_manager=None, lawyer_tracker=None, auto_reply: bool = True, verbose: bool = True):
     """
     Process new emails and optionally send replies.
     
     Args:
         agent: The email agent instance
+        conversation_manager: Conversation manager instance (if None, creates file-based one)
+        lawyer_tracker: Lawyer tracker instance (if None, creates file-based one)
         auto_reply: If True, automatically send replies
         verbose: If True, show detailed output
     """
@@ -292,10 +333,15 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
     if verbose:
         print(f"[{timestamp}] Checking for new emails...")
     
-    # Initialize conversation manager, email filter, and lawyer tracker
-    conversation_manager = ConversationManager()
+    # Use provided managers or create file-based ones (for backward compatibility)
+    if conversation_manager is None:
+        from backend.email_service.email_conversation_manager import ConversationManager as FileConversationManager
+        conversation_manager = FileConversationManager()
+    if lawyer_tracker is None:
+        from backend.email_service.lawyer_tracker import LawyerTracker as FileLawyerTracker
+        lawyer_tracker = FileLawyerTracker()
+    
     email_filter = EmailFilter()
-    lawyer_tracker = LawyerTracker()
     
     try:
         emails = fetch_new_emails()
@@ -315,10 +361,32 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
     skipped_count = 0
     
     for i, email_data in enumerate(emails, 1):
-        print(f"\n[Email {i}/{len(emails)}]")
+        print(f"\n{'='*80}")
+        print(f"[Email {i}/{len(emails)}]")
+        print(f"{'='*80}")
         print(f"  From: {email_data['from_display']}")
+        print(f"  To: {email_data.get('to', 'N/A')}")
         print(f"  Subject: {email_data['subject']}")
         print(f"  Date: {email_data['date']}")
+        print(f"  Message ID: {email_data.get('message_id', 'N/A')}")
+        print(f"  In-Reply-To: {email_data.get('in_reply_to', 'N/A')}")
+        print(f"  References: {email_data.get('references', 'N/A')}")
+        print(f"\n  {'-'*80}")
+        print(f"  FULL EMAIL BODY:")
+        print(f"  {'-'*80}")
+        print(f"  {email_data['body']}")
+        print(f"  {'-'*80}")
+        print(f"{'='*80}\n")
+        
+        # Save incoming email to conversation history FIRST (even if skipped)
+        # This ensures all emails are tracked, not just ones we reply to
+        try:
+            thread_id = conversation_manager.add_email(email_data)
+            print(f"  [OK] Saved email to conversation history (Thread ID: {thread_id})")
+        except Exception as e:
+            print(f"  [WARNING] Failed to save email to conversation history: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
         # Check if email should be processed
         should_process, reason = email_filter.should_process(email_data)
@@ -344,11 +412,15 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
         if hasattr(agent, 'is_lawyer_email'):
             is_tracked_lawyer = agent.is_lawyer_email(from_email)
             if is_tracked_lawyer:
+                print(f"\n  {'#'*80}")
+                print(f"  # LAWYER RESPONSE DETECTED!")
+                print(f"  {'#'*80}")
                 print(f"  [LAWYER] Email from tracked lawyer: {from_email}")
                 conv_status = agent.get_lawyer_conversation_status(from_email)
                 if conv_status:
                     print(f"           Status: {conv_status.get('status', 'unknown')}")
                     print(f"           Message count: {conv_status.get('message_count', 0)}")
+                print(f"  {'#'*80}\n")
         
         # Check if this might be from a lawyer (even if not tracked) and track it
         body_lower = email_data.get('body', '').lower()
@@ -371,6 +443,19 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
         
         print(f"  Body preview: {email_data['body'][:100]}..." if len(email_data['body']) > 100 else f"  Body: {email_data['body']}")
         
+        # Check for phone call request
+        if thread_id and conversation_manager:
+            email_body = email_data.get('body', '')
+            if conversation_manager.detect_phone_call_request(email_body):
+                print(f"\n  {'!'*80}")
+                print(f"  ⚠️  PHONE CALL REQUEST DETECTED!")
+                print(f"  {'!'*80}")
+                print(f"  The lawyer has requested a phone call in this email.")
+                print(f"  Thread ID: {thread_id}")
+                print(f"  Check the frontend for phone call notifications.")
+                print(f"  {'!'*80}\n")
+                conversation_manager.set_phone_call_requested(thread_id, True)
+        
         # Generate reply with conversation context
         print(f"\n  Generating AI reply...")
         reply = generate_reply(agent, email_data, conversation_manager)
@@ -381,7 +466,7 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
             if auto_reply:
                 # Send reply
                 print(f"  Sending reply...")
-                if send_reply(email_data, reply):
+                if send_reply(email_data, reply, conversation_manager):
                     print(f"  [OK] Reply sent successfully!")
                     save_processed_email(email_data['uid'])
                     processed_count += 1
@@ -403,12 +488,14 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
     print(f"  Processed: {processed_count}, Skipped: {skipped_count}\n")
 
 
-def listen_loop(agent, check_interval: int = 60, auto_reply: bool = True):
+def listen_loop(agent, conversation_manager=None, lawyer_tracker=None, check_interval: int = 60, auto_reply: bool = True):
     """
     Main loop to continuously check for emails.
     
     Args:
         agent: The email agent instance
+        conversation_manager: Conversation manager instance (optional)
+        lawyer_tracker: Lawyer tracker instance (optional)
         check_interval: Seconds between checks (default: 60)
         auto_reply: If True, automatically send replies
     """
@@ -425,7 +512,7 @@ def listen_loop(agent, check_interval: int = 60, auto_reply: bool = True):
     
     try:
         while True:
-            process_emails(agent, auto_reply=auto_reply, verbose=True)
+            process_emails(agent, conversation_manager=conversation_manager, lawyer_tracker=lawyer_tracker, auto_reply=auto_reply, verbose=True)
             time.sleep(check_interval)
             
     except KeyboardInterrupt:

@@ -37,6 +37,7 @@ class LawyerOffer:
     last_contact_date: str = ""
     email_count: int = 0
     thread_id: str = ""
+    location: str = ""  # City, State or full address
     
     def __post_init__(self):
         if self.case_types is None:
@@ -157,6 +158,22 @@ class LawyerTracker:
         firm_match = re.search(r'(?:firm|law\s*group|attorney|legal).*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', email_body)
         if firm_match:
             lawyer.firm_name = firm_match.group(1)
+        
+        # Extract location (city, state patterns)
+        # Patterns: "New York, NY", "Los Angeles, California", "Chicago, IL", "based in San Francisco"
+        location_patterns = [
+            r'(?:located|based|office|practicing|serving).*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2}|[A-Z][a-z]+)',
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2}|[A-Z][a-z]+)',
+            r'(?:in|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        ]
+        for pattern in location_patterns:
+            loc_match = re.search(pattern, email_body)
+            if loc_match:
+                if len(loc_match.groups()) >= 2:
+                    lawyer.location = f"{loc_match.group(1)}, {loc_match.group(2)}"
+                else:
+                    lawyer.location = loc_match.group(1)
+                break
         
         # Store thread ID if available
         if 'thread_id' in email_data:
