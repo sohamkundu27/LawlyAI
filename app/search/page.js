@@ -54,10 +54,10 @@ const mockLawyers = [
     id: 2,
     name: 'Michael Chen',
     specialty: 'Family Law',
-    rating: 4.8,
+    email: 'mchen@chenfamilylaw.com',
+    fee: '$275/hour',
     experience: '12 years',
     location: 'Los Angeles, CA',
-    availability: 'Available',
     bio: 'Expert in divorce proceedings, child custody, and family mediation with a compassionate approach.',
     emailThread: [
       {
