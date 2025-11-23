@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Scale, ChevronDown, ChevronUp, Mail, Star, MapPin, Briefcase, ArrowLeft } from 'lucide-react'
+import { Scale, ChevronDown, ChevronUp, Mail, MapPin, Briefcase, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 
 // Mock lawyer data with email threads
