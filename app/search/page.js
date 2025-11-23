@@ -80,10 +80,10 @@ const mockLawyers = [
     id: 3,
     name: 'Jennifer Wallace',
     specialty: 'Criminal Defense',
-    rating: 4.9,
+    email: 'jwallace@wallacedefense.com',
+    fee: '$400/hour',
     experience: '18 years',
     location: 'Chicago, IL',
-    availability: 'Limited',
     bio: 'Former prosecutor with deep understanding of criminal law. Aggressive defense for serious charges.',
     emailThread: [
       {
