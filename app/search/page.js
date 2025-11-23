@@ -233,25 +233,34 @@ export default function SearchPage() {
   const hasDemoLawyers = backendDemoLawyers.length > 0
 
   let topRankedEntries = []
-  if (factEnrichedLawyers.length > 0) {
+  if (hasDemoLawyers) {
+    topRankedEntries = backendDemoLawyers.slice(0, 3).map((lawyer, index) => ({
+      source: 'demo',
+      lawyer,
+      rankIndex: index + 1
+    }))
+  } else if (factEnrichedLawyers.length > 0) {
     const sortedFact = [...factEnrichedLawyers].sort((a, b) => (b.rank_score || 0) - (a.rank_score || 0))
-    const backendTop = sortedFact.slice(0, 3).map((lawyer) => ({ source: 'backend', lawyer }))
+    const backendTop = sortedFact.slice(0, 3).map((lawyer, index) => ({ source: 'backend', lawyer, rankIndex: index + 1 }))
     const needed = Math.max(0, 3 - backendTop.length)
     if (needed > 0) {
       const fallbackForTop = fallbackRankingPool
         .filter((entry) => !backendTop.some((backendEntry) => backendEntry.lawyer.lawyer_email === entry.lawyer.lawyer_email))
         .slice(0, needed)
+        .map((entry, idx) => ({ ...entry, rankIndex: backendTop.length + idx + 1 }))
       topRankedEntries = [...backendTop, ...fallbackForTop]
     } else {
       topRankedEntries = backendTop
     }
   } else {
-    topRankedEntries = fallbackRankingPool.slice(0, 3)
+    topRankedEntries = fallbackRankingPool.slice(0, 3).map((entry, idx) => ({ ...entry, rankIndex: idx + 1 }))
   }
 
-  const rankingSubtitle = factEnrichedLawyers.length > 0
-    ? 'Ranked by live price + experience data extracted from lawyer emails'
-    : 'Ranked by Gemini match score until lawyers reply with more details'
+  const rankingSubtitle = hasDemoLawyers
+    ? 'Live demo inboxes showing the outreach email we just sent'
+    : factEnrichedLawyers.length > 0
+      ? 'Ranked by live price + experience data extracted from lawyer emails'
+      : 'Ranked by Gemini match score until lawyers reply with more details'
 
   const renderLawyerCard = (lawyer, options = {}) => {
     const { isDemo = false } = options
@@ -689,15 +698,19 @@ export default function SearchPage() {
                     {rankingSubtitle}
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {topRankedEntries.map((entry, index) => {
+                    {topRankedEntries.map((entry) => {
                       const lawyer = entry.lawyer
                       const isBackend = entry.source === 'backend' || entry.source === 'backend-fallback'
+                      const isDemoTop = entry.source === 'demo'
                       const email = lawyer.lawyer_email || lawyer.email
-                      const priceText = isBackend ? (lawyer.price_text || 'N/A') : 'N/A'
-                      const yearsExp = isBackend ? lawyer.years_experience : null
-                      const locationLabel = isBackend
-                        ? (lawyer.location_text || lawyer.location || 'N/A')
-                        : (lawyer.location || 'N/A')
+                      const priceText = isBackend
+                        ? (lawyer.price_text || 'N/A')
+                        : lawyer.price_text || (lawyer.flat_fee ? `$${lawyer.flat_fee.toLocaleString()} flat fee`
+                          : lawyer.hourly_rate ? `$${lawyer.hourly_rate}/hr`
+                          : lawyer.contingency_rate ? `${lawyer.contingency_rate}% contingency`
+                          : 'N/A')
+                      const yearsExp = isBackend ? lawyer.years_experience : (lawyer.years_experience ?? lawyer.experience_years)
+                      const locationLabel = lawyer.location_text || lawyer.location || 'N/A'
                       let scoreLabel = 'Match: N/A'
                       if (entry.source === 'backend') {
                         scoreLabel = `Score: ${lawyer.rank_score || 0}%`
@@ -706,16 +719,22 @@ export default function SearchPage() {
                       } else {
                         scoreLabel = `Match: ${Math.round(lawyer.match_score || 0)}%`
                       }
+                      const rankNumber = entry.rankIndex || 1
                       return (
-                        <Card key={`${entry.source}-${email || index}`} className="bg-white/95 border-0">
+                        <Card key={`${entry.source}-${email || rankNumber}`} className="bg-white/95 border-0">
                           <CardHeader className="pb-3">
                           <div className="flex items-center justify-between">
                             <CardTitle className="text-lg font-bold text-black">
-                              #{index + 1} {lawyer.lawyer_name || (email ? email.split('@')[0] : 'Lawyer')}
+                              #{rankNumber} {lawyer.lawyer_name || (email ? email.split('@')[0] : 'Lawyer')}
                             </CardTitle>
-                            <Badge className="bg-[#8B9D7F] text-white">
-                              {scoreLabel}
-                            </Badge>
+                            <div className="flex items-center gap-2">
+                              {isDemoTop && (
+                                <Badge className="bg-blue-500 text-white">Demo</Badge>
+                              )}
+                              <Badge className="bg-[#8B9D7F] text-white">
+                                {scoreLabel}
+                              </Badge>
+                            </div>
                           </div>
                           {email && (
                             <a

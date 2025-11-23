@@ -12,8 +12,7 @@ GEMINI_MODEL_NAME = "models/gemini-2.0-flash"
 
 def _configure_gemini() -> None:
     """Configures the Gemini client with the API key."""
-    # api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    api_key = "AIzaSyBS8PzkdA1gSn_jcU20xH4IL7btXW6APhQ"
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY (or GOOGLE_API_KEY) environment variable is not set")
     genai.configure(api_key=api_key)

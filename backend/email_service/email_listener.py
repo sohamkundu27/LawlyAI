@@ -553,8 +553,7 @@ def main():
     
     # Create agent
     print("Initializing email agent...")
-    # api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    api_key = "AIzaSyBS8PzkdA1gSn_jcU20xH4IL7btXW6APhQ"
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         print("[ERROR] GEMINI_API_KEY not set in .env file")
         return
