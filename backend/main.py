@@ -1,33 +1,74 @@
-from datasets import load_dataset
+"""
+FastAPI application for Hybrid Legal Search.
 
-def download_case_law_dataset():
+Run with:
+    uvicorn backend.main:app --reload
+"""
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+import os
+
+from backend.hybrid_search import HybridSearcher
+
+app = FastAPI(title="Legal Hybrid Search API")
+
+# Global searcher instance
+searcher: Optional[HybridSearcher] = None
+
+@app.on_event("startup")
+def startup_event():
     """
-    Download the HFforLegal/case-law dataset from Hugging Face.
+    Initialize the HybridSearcher on startup.
     """
-    print("Downloading HFforLegal/case-law dataset...")
+    global searcher
+    # Check if dataset exists
+    dataset_path = "./vectorized_dataset"
+    if not os.path.exists(dataset_path):
+        print(f"WARNING: Dataset path '{dataset_path}' not found.")
+        print("Make sure you have run build_embeddings.py first.")
     
-    # Load the dataset
-    dataset = load_dataset("HFforLegal/case-law")
-    
-    print(f"Dataset downloaded successfully!")
-    print(f"Dataset info: {dataset}")
-    
-    # Print some information about the dataset
-    if isinstance(dataset, dict):
-        for split_name, split_data in dataset.items():
-            print(f"\n{split_name} split:")
-            print(f"  Number of examples: {len(split_data)}")
-            if len(split_data) > 0:
-                print(f"  Features: {split_data.features}")
-                print(f"  Example: {split_data[0]}")
-    else:
-        print(f"Number of examples: {len(dataset)}")
-        if len(dataset) > 0:
-            print(f"Features: {dataset.features}")
-            print(f"Example: {dataset[0]}")
-    
-    return dataset
+    try:
+        searcher = HybridSearcher(dataset_path=dataset_path)
+    except Exception as e:
+        print(f"Error initializing searcher: {e}")
+        # We don't raise here to allow the app to start, but endpoints will fail
+        pass
 
-if __name__ == "__main__":
-    dataset = download_case_law_dataset()
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
 
+class SearchResult(BaseModel):
+    id: Optional[str] = None
+    title: Optional[str] = None
+    state: Optional[str] = None
+    citation: Optional[str] = None
+    snippet: Optional[str] = None
+    document: Optional[str] = None
+    dense_score: float
+    bm25_score: float
+    combined_score: float
+
+@app.post("/search-legal", response_model=List[SearchResult])
+def search_legal(request: SearchRequest):
+    """
+    Search for legal cases using hybrid search (Vector + Keyword).
+    """
+    if searcher is None:
+        raise HTTPException(status_code=503, detail="Search service not initialized (dataset load failed?)")
+    
+    try:
+        results = searcher.search(request.query, top_k=request.top_k)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    """
+    Simple health check endpoint.
+    """
+    status = "healthy" if searcher is not None else "degraded"
+    return {"status": status}
