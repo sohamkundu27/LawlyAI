@@ -228,10 +228,6 @@ export default function SearchPage() {
                         </p>
                         <div className="flex flex-wrap gap-3 mb-3">
                           <Badge variant="secondary" className="flex items-center gap-1">
-                            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                            {lawyer.rating}
-                          </Badge>
-                          <Badge variant="secondary" className="flex items-center gap-1">
                             <Briefcase className="w-4 h-4" />
                             {lawyer.experience}
                           </Badge>
@@ -239,10 +235,12 @@ export default function SearchPage() {
                             <MapPin className="w-4 h-4" />
                             {lawyer.location}
                           </Badge>
-                          <Badge
-                            className={lawyer.availability === 'Available' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
-                          >
-                            {lawyer.availability}
+                          <Badge variant="secondary" className="flex items-center gap-1">
+                            <Mail className="w-4 h-4" />
+                            {lawyer.email}
+                          </Badge>
+                          <Badge className="bg-[#8B9D7F] text-white hover:bg-[#7A8C6E]">
+                            {lawyer.fee}
                           </Badge>
                         </div>
                         <p className="text-gray-600">{lawyer.bio}</p>
