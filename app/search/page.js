@@ -14,10 +14,10 @@ const mockLawyers = [
     id: 1,
     name: 'Sarah Martinez',
     specialty: 'Personal Injury Law',
-    rating: 4.9,
+    email: 'smartinez@martinezlaw.com',
+    fee: '$350/hour',
     experience: '15 years',
     location: 'New York, NY',
-    availability: 'Available',
     bio: 'Specializes in personal injury cases with a focus on automotive accidents and workplace injuries.',
     emailThread: [
       {
