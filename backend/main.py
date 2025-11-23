@@ -1,4 +1,9 @@
 """
+DEPRECATED: This file is superseded by backend/app.py.
+Please run `uvicorn backend.app:app --reload` instead.
+"""
+
+"""
 FastAPI application for Hybrid Legal Search.
 
 Run with:

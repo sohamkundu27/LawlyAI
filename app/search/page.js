@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Scale, ChevronDown, ChevronUp, Mail, MapPin, Briefcase, ArrowLeft, Phone } from 'lucide-react'
 import Link from 'next/link'
 import { usePolling } from '@/hooks/use-polling'
-import { fetchLawyers, fetchLawyerConversation, fetchStats, startLawyerSearch, fetchPhoneCallRequests, fetchRankedLawyers } from '@/lib/api'
+import { fetchLawyers, fetchLawyerConversation, fetchStats, startLawyerSearch, fetchPhoneCallRequests, fetchRankedLawyers, searchLegal } from '@/lib/api'
 
 // Hardcoded lawyer emails (matching backend)
 const LAWYER_EMAILS = [
@@ -28,6 +28,7 @@ export default function SearchPage() {
   const [error, setError] = useState(null)
   const [phoneCallRequests, setPhoneCallRequests] = useState([])
   const [rankedLawyers, setRankedLawyers] = useState(null)
+  const [foundLawyers, setFoundLawyers] = useState([])
 
   // Memoize fetch functions to prevent unnecessary re-renders
   const fetchLawyersFn = useCallback(async () => {
@@ -158,15 +159,36 @@ export default function SearchPage() {
     setError(null)
 
     try {
-      // Start the lawyer search
-      const result = await startLawyerSearch(situation, LAWYER_EMAILS)
-      console.log('Search started:', result)
+      // Call the new search-legal endpoint
+      const results = await searchLegal(situation)
+      console.log('Search results:', results)
       
+      // Extract and map lawyers from the search results
+      const extracted = results.flatMap(r => r.extracted_lawyers || [])
+      
+      // Map backend fields to frontend expectations
+      const mapped = extracted.map(l => ({
+        lawyer_name: l.name,
+        lawyer_email: l.email,
+        firm_name: l.firm_or_affiliation,
+        location: l.location, // if available
+        email_source: l.email_source,
+        side: l.side,
+        role: l.role,
+        // Preserve other potential fields
+        case_title: l.case_title,
+        citation: l.citation
+      }))
+
+      // Remove duplicates by email
+      const uniqueLawyers = Array.from(new Map(mapped.map(item => [item.lawyer_email, item])).values())
+
+      setFoundLawyers(uniqueLawyers)
       setSearchStarted(true)
       setShowResults(true)
     } catch (err) {
       console.error('Error starting search:', err)
-      setError(err.message || 'Failed to start lawyer search. Please try again.')
+      setError(err.message || 'Failed to find lawyers. Please try again.')
     } finally {
       setIsSearching(false)
     }
@@ -184,6 +206,7 @@ export default function SearchPage() {
     setSituation('')
     setError(null)
     setPhoneCallRequests([])
+    setFoundLawyers([])
   }
 
   return (
@@ -402,23 +425,18 @@ export default function SearchPage() {
             )}
 
             {/* No Lawyers Yet - Show when search started but no lawyers yet */}
-            {searchStarted && (!lawyersData?.lawyers || lawyersData.lawyers.length === 0) && (
+            {searchStarted && foundLawyers.length === 0 && (!lawyersData?.lawyers || lawyersData.lawyers.length === 0) && (
               <div className="text-center py-12">
-                <p className="text-gray-600 mb-2">Waiting for lawyer responses...</p>
+                <p className="text-gray-600 mb-2">Finding the best lawyers for you...</p>
                 <p className="text-sm text-gray-500">
-                  Emails have been sent to {LAWYER_EMAILS.length} lawyers. They should appear here once they respond.
+                  Scanning case database and matching with legal experts.
                 </p>
-                {lawyersLastUpdate && (
-                  <p className="text-xs text-gray-400 mt-2">
-                    Last checked: {new Date(lawyersLastUpdate).toLocaleTimeString()}
-                  </p>
-                )}
               </div>
             )}
 
             {/* Lawyer Cards */}
             <div className="max-w-5xl mx-auto space-y-6">
-              {lawyersData?.lawyers?.map((lawyer) => {
+              {(foundLawyers.length > 0 ? foundLawyers : lawyersData?.lawyers)?.map((lawyer) => {
                 const thread = lawyerThreads[lawyer.lawyer_email]
                 const emails = thread?.threads?.[0]?.emails || []
                 
@@ -449,7 +467,23 @@ export default function SearchPage() {
                               {lawyer.firm_name}
                             </p>
                           )}
+                          {(lawyer.case_title || lawyer.citation) && (
+                            <div className="mb-3 text-sm bg-gray-50 p-2 rounded border border-gray-100">
+                              {lawyer.case_title && <p className="font-medium text-gray-800 mb-1">Case: {lawyer.case_title}</p>}
+                              {lawyer.citation && <p className="text-gray-500 italic">Citation: {lawyer.citation}</p>}
+                            </div>
+                          )}
                           <div className="flex flex-wrap gap-3 mb-3">
+                            {lawyer.side && (
+                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                                {lawyer.side}
+                              </Badge>
+                            )}
+                            {lawyer.role && (
+                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-700">
+                                {lawyer.role}
+                              </Badge>
+                            )}
                             {lawyer.experience_years && (
                               <Badge variant="secondary" className="flex items-center gap-1">
                                 <Briefcase className="w-4 h-4" />
@@ -460,6 +494,11 @@ export default function SearchPage() {
                               <Mail className="w-4 h-4" />
                               {lawyer.lawyer_email}
                             </Badge>
+                            {lawyer.email_source && (
+                              <Badge variant="outline" className="text-xs text-gray-500">
+                                Source: {lawyer.email_source}
+                              </Badge>
+                            )}
                             {lawyer.flat_fee && (
                               <Badge className="bg-[#8B9D7F] text-white">
                                 ${lawyer.flat_fee.toLocaleString()} flat fee
