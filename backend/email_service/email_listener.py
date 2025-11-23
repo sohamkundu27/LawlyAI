@@ -198,6 +198,23 @@ def generate_reply(agent, original_email: Dict, conversation_manager: Conversati
     thread_id = conversation_manager.add_email(original_email)
     conversation_context = conversation_manager.get_conversation_context(thread_id)
     
+    from_email = original_email.get('from', '').lower().strip()
+    
+    # Check if this is from a tracked lawyer
+    if hasattr(agent, 'is_lawyer_email') and agent.is_lawyer_email(from_email):
+        # Use lawyer-specific reply generation
+        try:
+            reply = agent.generate_lawyer_reply(
+                lawyer_email=from_email,
+                incoming_email=original_email,
+                conversation_context=conversation_context
+            )
+            return reply if reply else None
+        except Exception as e:
+            print(f"[ERROR] Failed to generate lawyer reply: {str(e)}")
+            # Fall through to regular reply generation
+    
+    # Regular reply generation for non-lawyer emails or fallback
     # Create context for the agent
     if conversation_context and len(conversation_manager.get_conversation_history(thread_id)) > 1:
         # This is part of an ongoing conversation
@@ -320,16 +337,28 @@ def process_emails(agent, auto_reply: bool = True, verbose: bool = True):
         else:
             print(f"  Thread: New conversation")
         
-        # Check if this might be from a lawyer and track it
+        # Check if this is from a tracked lawyer
         from_email = email_data.get('from', '').lower()
+        is_tracked_lawyer = False
+        
+        if hasattr(agent, 'is_lawyer_email'):
+            is_tracked_lawyer = agent.is_lawyer_email(from_email)
+            if is_tracked_lawyer:
+                print(f"  [LAWYER] Email from tracked lawyer: {from_email}")
+                conv_status = agent.get_lawyer_conversation_status(from_email)
+                if conv_status:
+                    print(f"           Status: {conv_status.get('status', 'unknown')}")
+                    print(f"           Message count: {conv_status.get('message_count', 0)}")
+        
+        # Check if this might be from a lawyer (even if not tracked) and track it
         body_lower = email_data.get('body', '').lower()
         is_lawyer_email = any(keyword in body_lower for keyword in [
             'attorney', 'lawyer', 'legal', 'law firm', 'counsel', 
             'litigation', 'representation', 'retainer', 'contingency'
         ])
         
-        if is_lawyer_email:
-            print(f"  [LAWYER] Detected potential lawyer email - tracking offer...")
+        if is_lawyer_email or is_tracked_lawyer:
+            print(f"  [LAWYER] Detected lawyer email - tracking offer...")
             lawyer = lawyer_tracker.add_lawyer_email(email_data, thread_id or "")
             if lawyer:
                 print(f"  [LAWYER] Extracted: {lawyer.lawyer_name}")
