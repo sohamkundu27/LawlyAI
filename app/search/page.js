@@ -3,20 +3,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Scale, ChevronDown, ChevronUp, Mail, MapPin, Briefcase, ArrowLeft, Phone } from 'lucide-react'
 import Link from 'next/link'
 import { usePolling } from '@/hooks/use-polling'
-import { fetchLawyers, fetchLawyerConversation, fetchStats, startLawyerSearch, fetchPhoneCallRequests, fetchRankedLawyers, searchLegal } from '@/lib/api'
+import { fetchLawyers, fetchLawyerConversation, fetchStats, startLawyerSearch, fetchPhoneCallRequests, searchLegal } from '@/lib/api'
 
-// Hardcoded lawyer emails (matching backend)
-const LAWYER_EMAILS = [
+// Hardcoded demo lawyer emails (matching backend)
+const DEMO_LAWYER_EMAILS = [
   "sohamkundu2704@gmail.com",
   "jaybalu06@gmail.com",
   "arnavmohanty123@gmail.com"
 ]
+
+const DEMO_EMAILS_SET = new Set(DEMO_LAWYER_EMAILS.map(email => email.toLowerCase()))
 
 export default function SearchPage() {
   const [situation, setSituation] = useState('')
@@ -27,7 +28,6 @@ export default function SearchPage() {
   const [lawyerThreads, setLawyerThreads] = useState({})
   const [error, setError] = useState(null)
   const [phoneCallRequests, setPhoneCallRequests] = useState([])
-  const [rankedLawyers, setRankedLawyers] = useState(null)
   const [foundLawyers, setFoundLawyers] = useState([])
 
   // Memoize fetch functions to prevent unnecessary re-renders
@@ -78,34 +78,6 @@ export default function SearchPage() {
       enabled: showResults && searchStarted
     }
   )
-
-  // Fetch ranked lawyers
-  const fetchRankedLawyersFn = useCallback(async () => {
-    try {
-      const response = await fetchRankedLawyers()
-      return response
-    } catch (err) {
-      console.error('Error fetching ranked lawyers:', err)
-      return { lawyers: [], count: 0 }
-    }
-  }, [])
-
-  // Poll for ranked lawyers every 10 seconds
-  const { data: rankedLawyersData, isLoading: rankedLoading } = usePolling(
-    fetchRankedLawyersFn,
-    {
-      interval: 10000,
-      maxInterval: 60000,
-      enabled: showResults && searchStarted
-    }
-  )
-
-  // Update ranked lawyers state
-  useEffect(() => {
-    if (rankedLawyersData) {
-      setRankedLawyers(rankedLawyersData)
-    }
-  }, [rankedLawyersData])
 
   // Fetch conversation thread when a lawyer is expanded
   useEffect(() => {
@@ -167,23 +139,34 @@ export default function SearchPage() {
       const extracted = results.flatMap(r => r.extracted_lawyers || [])
       
       // Map backend fields to frontend expectations
-      const mapped = extracted.map(l => ({
-        lawyer_name: l.name,
-        lawyer_email: l.email,
-        firm_name: l.firm_or_affiliation,
-        location: l.location, // if available
-        email_source: l.email_source,
-        side: l.side,
-        role: l.role,
-        // Preserve other potential fields
-        case_title: l.case_title,
-        citation: l.citation
-      }))
+      const mapped = extracted.map(l => {
+        const rawScore = typeof l.match_score === 'number'
+          ? l.match_score
+          : Number.parseInt(l.match_score ?? 0, 10) || 0
+        return {
+          lawyer_name: l.name,
+          lawyer_email: l.email,
+          firm_name: l.firm_or_affiliation,
+          location: l.location, // if available
+          email_source: l.email_source,
+          side: l.side,
+          role: l.role,
+          specialty: (l.specialty || '').toString().trim(),
+          match_score: Math.max(0, Math.min(100, rawScore)),
+          // Preserve other potential fields
+          case_title: l.case_title,
+          citation: l.citation
+        }
+      })
 
       // Remove duplicates by email
       const uniqueLawyers = Array.from(new Map(mapped.map(item => [item.lawyer_email, item])).values())
 
-      setFoundLawyers(uniqueLawyers)
+      // Sort by match_score descending
+      const ranked = [...uniqueLawyers].sort((a, b) => (b.match_score || 0) - (a.match_score || 0))
+
+      // Set state
+      setFoundLawyers(ranked)
       setSearchStarted(true)
       setShowResults(true)
     } catch (err) {
@@ -209,6 +192,373 @@ export default function SearchPage() {
     setFoundLawyers([])
   }
 
+  // Derived ranking data
+  const backendLawyersRaw = lawyersData?.lawyers || []
+  const backendDemoLawyers = backendLawyersRaw.filter(
+    (lawyer) => DEMO_EMAILS_SET.has((lawyer.lawyer_email || '').toLowerCase())
+  )
+  const backendNonDemoLawyers = backendLawyersRaw.filter(
+    (lawyer) => !DEMO_EMAILS_SET.has((lawyer.lawyer_email || '').toLowerCase())
+  )
+  const filteredFoundLawyers = foundLawyers.filter(
+    (lawyer) => !DEMO_EMAILS_SET.has((lawyer.lawyer_email || '').toLowerCase())
+  )
+  const factEnrichedLawyers = backendNonDemoLawyers.filter((lawyer) => (lawyer.rank_score || 0) > 0)
+  const foundLawyerMap = new Map(filteredFoundLawyers.map((lawyer) => [lawyer.lawyer_email, lawyer]))
+  const backendFallbackForRanking = backendNonDemoLawyers
+    .filter((lawyer) => (lawyer.rank_score || 0) === 0)
+    .filter((lawyer) => !foundLawyerMap.has(lawyer.lawyer_email))
+    .map((lawyer) => ({
+      lawyer_name: lawyer.lawyer_name || '',
+      lawyer_email: lawyer.lawyer_email,
+      firm_name: lawyer.firm_name,
+      specialty: '',
+      match_score: 0,
+      case_title: '',
+      citation: '',
+      location: lawyer.location_text || lawyer.location,
+      price_text: lawyer.price_text || 'N/A',
+      years_experience: lawyer.years_experience,
+      fallbackBackend: true
+    }))
+
+  const fallbackRankingPool = [
+    ...filteredFoundLawyers.map((lawyer) => ({ source: 'gemini', lawyer })),
+    ...backendFallbackForRanking.map((lawyer) => ({ source: 'backend-fallback', lawyer }))
+  ].sort((a, b) => (b.lawyer.match_score || 0) - (a.lawyer.match_score || 0))
+
+  const displayLawyers = filteredFoundLawyers.length > 0
+    ? filteredFoundLawyers
+    : backendNonDemoLawyers
+  const hasDemoLawyers = backendDemoLawyers.length > 0
+
+  let topRankedEntries = []
+  if (factEnrichedLawyers.length > 0) {
+    const sortedFact = [...factEnrichedLawyers].sort((a, b) => (b.rank_score || 0) - (a.rank_score || 0))
+    const backendTop = sortedFact.slice(0, 3).map((lawyer) => ({ source: 'backend', lawyer }))
+    const needed = Math.max(0, 3 - backendTop.length)
+    if (needed > 0) {
+      const fallbackForTop = fallbackRankingPool
+        .filter((entry) => !backendTop.some((backendEntry) => backendEntry.lawyer.lawyer_email === entry.lawyer.lawyer_email))
+        .slice(0, needed)
+      topRankedEntries = [...backendTop, ...fallbackForTop]
+    } else {
+      topRankedEntries = backendTop
+    }
+  } else {
+    topRankedEntries = fallbackRankingPool.slice(0, 3)
+  }
+
+  const rankingSubtitle = factEnrichedLawyers.length > 0
+    ? 'Ranked by live price + experience data extracted from lawyer emails'
+    : 'Ranked by Gemini match score until lawyers reply with more details'
+
+  const renderLawyerCard = (lawyer, options = {}) => {
+    const { isDemo = false } = options
+    const lawyerEmail = lawyer.lawyer_email || lawyer.email || ''
+    const fallbackKey = `${lawyer.lawyer_name || 'lawyer'}-${lawyer.firm_name || 'firm'}`
+    const cardKey = lawyerEmail || fallbackKey
+    const thread = lawyerEmail ? lawyerThreads[lawyerEmail] : null
+    const emails = thread?.threads?.[0]?.emails || []
+    const matchScoreRaw = typeof lawyer.match_score === 'number'
+      ? lawyer.match_score
+      : Number.parseInt(lawyer.match_score ?? 0, 10)
+    const normalizedMatchScore = Number.isFinite(matchScoreRaw)
+      ? Math.max(0, Math.min(100, matchScoreRaw))
+      : null
+    const mailtoLink = lawyerEmail ? `mailto:${lawyerEmail}` : null
+    const priceText = lawyer.price_text
+      || (lawyer.flat_fee ? `$${lawyer.flat_fee.toLocaleString()} flat fee`
+        : lawyer.hourly_rate ? `$${lawyer.hourly_rate}/hr`
+        : lawyer.contingency_rate ? `${lawyer.contingency_rate}% contingency`
+        : 'N/A')
+    const yearsExperience = lawyer.years_experience ?? lawyer.experience_years
+    const experienceLabel = yearsExperience ? `${yearsExperience} years` : 'N/A'
+    const locationLabel = lawyer.location_text || lawyer.location || 'N/A'
+    const hasPhoneCallRequest = phoneCallRequests.some(
+      (req) => req.lawyer_email === lawyer.lawyer_email
+    )
+
+    return (
+      <Card key={cardKey} className="border-2 border-[#8B9D7F] shadow-md">
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <CardTitle className="text-2xl text-black">
+                  {lawyer.lawyer_name || lawyerEmail || 'Lawyer'}
+                </CardTitle>
+                {isDemo && (
+                  <Badge className="bg-blue-500 text-white">Demo Lawyer</Badge>
+                )}
+                {hasPhoneCallRequest && (
+                  <Badge className="bg-yellow-500 text-white flex items-center gap-1">
+                    <Phone className="w-3 h-3" />
+                    Call Requested
+                  </Badge>
+                )}
+              </div>
+              {lawyerEmail && (
+                <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                  <Mail className="w-4 h-4" />
+                  <a
+                    href={mailtoLink}
+                    className="underline break-all"
+                    rel="noreferrer"
+                  >
+                    {lawyerEmail}
+                  </a>
+                </div>
+              )}
+              {lawyer.firm_name && (
+                <p className="text-[#8B9D7F] font-semibold text-lg mb-3">
+                  {lawyer.firm_name}
+                </p>
+              )}
+              {(lawyer.case_title || lawyer.citation) && (
+                <div className="mb-3 text-sm bg-gray-50 p-2 rounded border border-gray-100">
+                  {lawyer.case_title && <p className="font-medium text-gray-800 mb-1">Case: {lawyer.case_title}</p>}
+                  {lawyer.citation && <p className="text-gray-500 italic">Citation: {lawyer.citation}</p>}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-3 mb-3">
+                {lawyer.specialty && (
+                  <Badge className="bg-[#8B9D7F] text-white">
+                    {lawyer.specialty}
+                  </Badge>
+                )}
+                {(lawyer.rank_score || 0) > 0 && (
+                  <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
+                    Score: {lawyer.rank_score}%
+                  </Badge>
+                )}
+                {normalizedMatchScore !== null && (
+                  <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
+                    Match: {Math.round(normalizedMatchScore)}%
+                  </Badge>
+                )}
+                {lawyer.side && (
+                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                    {lawyer.side}
+                  </Badge>
+                )}
+                {lawyer.role && (
+                  <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-700">
+                    {lawyer.role}
+                  </Badge>
+                )}
+                {lawyer.experience_years && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Briefcase className="w-4 h-4" />
+                    {lawyer.experience_years} years
+                  </Badge>
+                )}
+                {lawyer.flat_fee && (
+                  <Badge className="bg-[#8B9D7F] text-white">
+                    ${lawyer.flat_fee.toLocaleString()} flat fee
+                  </Badge>
+                )}
+                {lawyer.hourly_rate && (
+                  <Badge className="bg-[#8B9D7F] text-white">
+                    ${lawyer.hourly_rate}/hr
+                  </Badge>
+                )}
+                {lawyer.contingency_rate && (
+                  <Badge className="bg-[#8B9D7F] text-white">
+                    {lawyer.contingency_rate}% contingency
+                  </Badge>
+                )}
+              </div>
+              {lawyer.case_types && lawyer.case_types.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {lawyer.case_types.map((type, idx) => (
+                    <Badge key={idx} variant="outline">{type}</Badge>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm text-gray-600 mb-3">
+                <div>
+                  <span className="font-semibold text-black">Price:</span> {priceText || 'N/A'}
+                </div>
+                <div>
+                  <span className="font-semibold text-black">Experience:</span> {experienceLabel}
+                </div>
+                <div className="flex items-center gap-1">
+                  <MapPin className="w-4 h-4" />
+                  <span>{locationLabel || 'N/A'}</span>
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">
+                <p>Emails exchanged: {lawyer.email_count || 0}</p>
+                {lawyer.last_contact_date && (
+                  <p>Last contact: {new Date(lawyer.last_contact_date).toLocaleString()}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {lawyerEmail && (
+            <Button
+              onClick={() => toggleExpand(lawyerEmail)}
+              className="w-full bg-[#8B9D7F] hover:bg-[#7A8C6E] text-white"
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              {expandedLawyer === lawyerEmail ? 'Hide' : 'View'} Email Thread
+              {expandedLawyer === lawyerEmail ? (
+                <ChevronUp className="w-4 h-4 ml-2" />
+              ) : (
+                <ChevronDown className="w-4 h-4 ml-2" />
+              )}
+            </Button>
+          )}
+
+          {/* Email Thread - Chat Format */}
+          {lawyerEmail && expandedLawyer === lawyerEmail && (
+            <div className="mt-6">
+              <h3 className="text-xl font-bold text-black mb-4">
+                Conversation
+              </h3>
+              {emails.length === 0 ? (
+                <p className="text-gray-600">No messages yet. Waiting for response...</p>
+              ) : (
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {emails.map((email, index) => {
+                    const lawyerEmailLower = lawyerEmail.toLowerCase()
+                    const emailToLower = (email.to || '').toLowerCase()
+                    const emailFromLower = (email.from || '').toLowerCase()
+                    
+                    const isFromLawlyAI = 
+                      emailToLower === lawyerEmailLower ||
+                      emailFromLower.includes('lawlyai') || 
+                      emailFromLower.includes('agent') ||
+                      emailFromLower.includes('lawyerfinder')
+                    
+                    const senderName = isFromLawlyAI 
+                      ? 'LawlyAI' 
+                      : (lawyer.lawyer_name || (email.from || '').split('@')[0] || 'Lawyer')
+                    
+                    let cleanBody = email.body || ''
+                    
+                    const replyMarkers = [
+                      /\r?\n\s*On\s+[^<]*<[^>]+>\s+wrote:\s*$/i,
+                      /\r?\n\s*On\s+.*?wrote:\s*$/i,
+                      /\r?\n\s*From:\s+.*$/i,
+                      /\r?\n\s*-\s*Original\s+Message.*$/i,
+                    ]
+                    
+                    let replyStartIndex = -1
+                    for (const marker of replyMarkers) {
+                      const match = cleanBody.match(marker)
+                      if (match && match.index !== undefined) {
+                        const beforeMarker = cleanBody.substring(0, match.index).trim()
+                        if (beforeMarker.length > 0) {
+                          replyStartIndex = match.index
+                          break
+                        }
+                      }
+                    }
+                    
+                    if (replyStartIndex > 0) {
+                      cleanBody = cleanBody.substring(0, replyStartIndex).trim()
+                    }
+                    
+                    const lines = cleanBody.split(/\r?\n/)
+                    const cleanedLines = []
+                    let consecutiveQuotedLines = 0
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                      const line = lines[i]
+                      const isQuoted = /^\s*>\s*/.test(line)
+                      
+                      if (isQuoted) {
+                        consecutiveQuotedLines++
+                        if (consecutiveQuotedLines >= 2) {
+                          continue
+                        }
+                      } else {
+                        consecutiveQuotedLines = 0
+                        cleanedLines.push(line)
+                      }
+                    }
+                    
+                    cleanBody = cleanedLines.join('\n').trim()
+                    
+                    if (!cleanBody || cleanBody.length < 5) {
+                      const original = email.body || ''
+                      const onWroteMatch = original.match(/\r?\n\s*On\s+.*?wrote:.*$/s)
+                      if (onWroteMatch && onWroteMatch.index > 10) {
+                        cleanBody = original.substring(0, onWroteMatch.index).trim()
+                      } else {
+                        cleanBody = original.trim()
+                      }
+                    }
+                    
+                    const timestamp = new Date(email.timestamp || email.date)
+                    const timeStr = timestamp.toLocaleTimeString('en-US', { 
+                      hour: 'numeric', 
+                      minute: '2-digit',
+                      hour12: true 
+                    })
+                    const dateStr = timestamp.toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric'
+                    })
+                    const isToday = timestamp.toDateString() === new Date().toDateString()
+                    
+                    return (
+                      <div
+                        key={index}
+                        className={`flex ${isFromLawlyAI ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[75%] ${isFromLawlyAI ? 'order-2' : 'order-1'}`}>
+                          <div className={`rounded-2xl px-4 py-2 ${
+                            isFromLawlyAI
+                              ? 'bg-[#8B9D7F] text-white rounded-br-sm'
+                              : 'bg-gray-200 text-gray-900 rounded-bl-sm'
+                          }`}>
+                            {!isFromLawlyAI && (
+                              <p className="text-xs font-semibold mb-1 opacity-80">
+                                {senderName}
+                              </p>
+                            )}
+                            
+                            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                              {cleanBody}
+                            </div>
+                            
+                            <p className={`text-xs mt-1 ${
+                              isFromLawlyAI ? 'text-white/70' : 'text-gray-600'
+                            }`}>
+                              {isToday ? timeStr : `${dateStr} ${timeStr}`}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              
+              {thread?.threads?.[0] && thread.threads[0].phone_call_requested && (
+                <div className="mt-6 border-t pt-4">
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded">
+                    <div className="flex items-center">
+                      <Phone className="w-5 h-5 text-yellow-600 mr-2" />
+                      <div>
+                        <p className="font-semibold text-yellow-800">Phone Call Requested</p>
+                        <p className="text-sm text-yellow-700">The lawyer has requested a phone call to discuss further.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
   return (
     <div className="min-h-screen bg-white">
       {/* Navigation */}
@@ -329,82 +679,83 @@ export default function SearchPage() {
               </div>
 
               {/* Ranked Lawyers Section */}
-              {rankedLawyers && rankedLawyers.lawyers && rankedLawyers.lawyers.length > 0 && (
+              {topRankedEntries.length > 0 && (
                 <div className="bg-gradient-to-r from-[#8B9D7F] to-[#7A8C6E] rounded-lg p-6 mb-8 text-white">
                   <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                     <Scale className="w-6 h-6" />
                     Top Ranked Lawyers
                   </h2>
                   <p className="text-white/90 mb-4">
-                    Ranked by quote, experience, and location match
+                    {rankingSubtitle}
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {rankedLawyers.lawyers.slice(0, 3).map((lawyer, index) => (
-                      <Card key={lawyer.lawyer_email} className="bg-white/95 border-0">
-                        <CardHeader className="pb-3">
+                    {topRankedEntries.map((entry, index) => {
+                      const lawyer = entry.lawyer
+                      const isBackend = entry.source === 'backend' || entry.source === 'backend-fallback'
+                      const email = lawyer.lawyer_email || lawyer.email
+                      const priceText = isBackend ? (lawyer.price_text || 'N/A') : 'N/A'
+                      const yearsExp = isBackend ? lawyer.years_experience : null
+                      const locationLabel = isBackend
+                        ? (lawyer.location_text || lawyer.location || 'N/A')
+                        : (lawyer.location || 'N/A')
+                      let scoreLabel = 'Match: N/A'
+                      if (entry.source === 'backend') {
+                        scoreLabel = `Score: ${lawyer.rank_score || 0}%`
+                      } else if (entry.source === 'backend-fallback') {
+                        scoreLabel = 'Score: Pending'
+                      } else {
+                        scoreLabel = `Match: ${Math.round(lawyer.match_score || 0)}%`
+                      }
+                      return (
+                        <Card key={`${entry.source}-${email || index}`} className="bg-white/95 border-0">
+                          <CardHeader className="pb-3">
                           <div className="flex items-center justify-between">
                             <CardTitle className="text-lg font-bold text-black">
-                              #{index + 1} {lawyer.lawyer_name || lawyer.lawyer_email.split('@')[0]}
+                              #{index + 1} {lawyer.lawyer_name || (email ? email.split('@')[0] : 'Lawyer')}
                             </CardTitle>
-                            {lawyer.ranking && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                Score: {(lawyer.ranking.total_score * 100).toFixed(0)}%
-                              </Badge>
-                            )}
+                            <Badge className="bg-[#8B9D7F] text-white">
+                              {scoreLabel}
+                            </Badge>
                           </div>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
+                          {email && (
+                            <a
+                              href={`mailto:${email}`}
+                              className="text-sm text-[#8B9D7F] underline break-all"
+                            >
+                              {email}
+                            </a>
+                          )}
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                          {lawyer.specialty && !isBackend && (
+                            <div className="font-medium text-[#8B9D7F]">
+                              Specialty: {lawyer.specialty}
+                            </div>
+                          )}
                           {lawyer.firm_name && (
                             <p className="text-sm text-gray-600">{lawyer.firm_name}</p>
                           )}
-                          {lawyer.location && (
-                            <div className="flex items-center gap-1 text-sm text-gray-600">
-                              <MapPin className="w-4 h-4" />
-                              {lawyer.location}
-                            </div>
-                          )}
-                          {lawyer.experience_years && (
+                          <div className="text-sm text-gray-600">
+                            <span className="font-semibold text-black">Price:</span> {priceText}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            <span className="font-semibold text-black">Experience:</span>{' '}
+                            {yearsExp ? `${yearsExp} years` : 'N/A'}
+                          </div>
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <MapPin className="w-4 h-4" />
+                            {locationLabel || 'N/A'}
+                          </div>
+                          {(lawyer.experience_years && !yearsExp) && (
                             <div className="flex items-center gap-1 text-sm text-gray-600">
                               <Briefcase className="w-4 h-4" />
                               {lawyer.experience_years} years experience
                             </div>
                           )}
-                          <div className="pt-2 border-t border-gray-200">
-                            {lawyer.flat_fee && (
-                              <p className="text-sm font-semibold text-[#8B9D7F]">
-                                Flat Fee: ${lawyer.flat_fee.toLocaleString()}
-                              </p>
-                            )}
-                            {lawyer.hourly_rate && (
-                              <p className="text-sm text-gray-600">
-                                Hourly: ${lawyer.hourly_rate}/hr
-                              </p>
-                            )}
-                            {lawyer.estimated_total && (
-                              <p className="text-sm text-gray-600">
-                                Est. Total: ${lawyer.estimated_total.toLocaleString()}
-                              </p>
-                            )}
-                          </div>
-                          {lawyer.ranking && (
-                            <div className="pt-2 border-t border-gray-200 space-y-1">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-600">Price:</span>
-                                <span className="font-semibold">{(lawyer.ranking.price_score * 100).toFixed(0)}%</span>
-                              </div>
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-600">Experience:</span>
-                                <span className="font-semibold">{(lawyer.ranking.experience_score * 100).toFixed(0)}%</span>
-                              </div>
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-600">Location:</span>
-                                <span className="font-semibold">{(lawyer.ranking.location_score * 100).toFixed(0)}%</span>
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -436,283 +787,28 @@ export default function SearchPage() {
 
             {/* Lawyer Cards */}
             <div className="max-w-5xl mx-auto space-y-6">
-              {(foundLawyers.length > 0 ? foundLawyers : lawyersData?.lawyers)?.map((lawyer) => {
-                const thread = lawyerThreads[lawyer.lawyer_email]
-                const emails = thread?.threads?.[0]?.emails || []
-                
-                // Debug logging
-                if (expandedLawyer === lawyer.lawyer_email) {
-                  console.log('Thread for', lawyer.lawyer_email, ':', thread)
-                  console.log('Emails:', emails)
-                }
-
-                return (
-                  <Card key={lawyer.lawyer_email} className="border-2 border-[#8B9D7F] shadow-md">
-                    <CardHeader>
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <CardTitle className="text-2xl text-black">
-                              {lawyer.lawyer_name || lawyer.lawyer_email}
-                            </CardTitle>
-                            {phoneCallRequests.some(req => req.lawyer_email === lawyer.lawyer_email) && (
-                              <Badge className="bg-yellow-500 text-white flex items-center gap-1">
-                                <Phone className="w-3 h-3" />
-                                Call Requested
-                              </Badge>
-                            )}
-                          </div>
-                          {lawyer.firm_name && (
-                            <p className="text-[#8B9D7F] font-semibold text-lg mb-3">
-                              {lawyer.firm_name}
-                            </p>
-                          )}
-                          {(lawyer.case_title || lawyer.citation) && (
-                            <div className="mb-3 text-sm bg-gray-50 p-2 rounded border border-gray-100">
-                              {lawyer.case_title && <p className="font-medium text-gray-800 mb-1">Case: {lawyer.case_title}</p>}
-                              {lawyer.citation && <p className="text-gray-500 italic">Citation: {lawyer.citation}</p>}
-                            </div>
-                          )}
-                          <div className="flex flex-wrap gap-3 mb-3">
-                            {lawyer.side && (
-                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
-                                {lawyer.side}
-                              </Badge>
-                            )}
-                            {lawyer.role && (
-                              <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-700">
-                                {lawyer.role}
-                              </Badge>
-                            )}
-                            {lawyer.experience_years && (
-                              <Badge variant="secondary" className="flex items-center gap-1">
-                                <Briefcase className="w-4 h-4" />
-                                {lawyer.experience_years} years
-                              </Badge>
-                            )}
-                            <Badge variant="secondary" className="flex items-center gap-1">
-                              <Mail className="w-4 h-4" />
-                              {lawyer.lawyer_email}
-                            </Badge>
-                            {lawyer.email_source && (
-                              <Badge variant="outline" className="text-xs text-gray-500">
-                                Source: {lawyer.email_source}
-                              </Badge>
-                            )}
-                            {lawyer.flat_fee && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                ${lawyer.flat_fee.toLocaleString()} flat fee
-                              </Badge>
-                            )}
-                            {lawyer.hourly_rate && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                ${lawyer.hourly_rate}/hr
-                              </Badge>
-                            )}
-                            {lawyer.contingency_rate && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                {lawyer.contingency_rate}% contingency
-                              </Badge>
-                            )}
-                          </div>
-                          {lawyer.case_types && lawyer.case_types.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mb-3">
-                              {lawyer.case_types.map((type, idx) => (
-                                <Badge key={idx} variant="outline">{type}</Badge>
-                              ))}
-                            </div>
-                          )}
-                          <div className="text-sm text-gray-600">
-                            <p>Emails exchanged: {lawyer.email_count || 0}</p>
-                            {lawyer.last_contact_date && (
-                              <p>Last contact: {new Date(lawyer.last_contact_date).toLocaleString()}</p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <Button
-                        onClick={() => toggleExpand(lawyer.lawyer_email)}
-                        className="w-full bg-[#8B9D7F] hover:bg-[#7A8C6E] text-white"
-                      >
-                        <Mail className="w-4 h-4 mr-2" />
-                        {expandedLawyer === lawyer.lawyer_email ? 'Hide' : 'View'} Email Thread
-                        {expandedLawyer === lawyer.lawyer_email ? (
-                          <ChevronUp className="w-4 h-4 ml-2" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4 ml-2" />
-                        )}
-                      </Button>
-
-                      {/* Email Thread - Chat Format */}
-                      {expandedLawyer === lawyer.lawyer_email && (
-                        <div className="mt-6">
-                          <h3 className="text-xl font-bold text-black mb-4">
-                            Conversation
-                          </h3>
-                          {emails.length === 0 ? (
-                            <p className="text-gray-600">No messages yet. Waiting for response...</p>
-                          ) : (
-                            <div className="space-y-3 max-h-96 overflow-y-auto">
-                              {emails.map((email, index) => {
-                                // Determine if message is from LawlyAI (us) or lawyer (them)
-                                // If email.to matches the lawyer's email, we sent it to them (so it's from us)
-                                // If email.from matches the lawyer's email, they sent it to us
-                                const lawyerEmailLower = lawyer.lawyer_email.toLowerCase()
-                                const emailToLower = (email.to || '').toLowerCase()
-                                const emailFromLower = (email.from || '').toLowerCase()
-                                
-                                const isFromLawlyAI = 
-                                  emailToLower === lawyerEmailLower || // We sent it to the lawyer
-                                  emailFromLower.includes('lawlyai') || 
-                                  emailFromLower.includes('agent') ||
-                                  emailFromLower.includes('lawyerfinder')
-                                
-                                // Extract sender name
-                                const senderName = isFromLawlyAI 
-                                  ? 'LawlyAI' 
-                                  : (lawyer.lawyer_name || email.from.split('@')[0] || 'Lawyer')
-                                
-                                // Clean up email body - remove quoted replies
-                                let cleanBody = email.body || ''
-                                
-                                // Find where quoted reply section starts
-                                // Look for common email reply markers
-                                const replyMarkers = [
-                                  /\r?\n\s*On\s+[^<]*<[^>]+>\s+wrote:\s*$/i,  // "On [date] <email> wrote:"
-                                  /\r?\n\s*On\s+.*?wrote:\s*$/i,              // "On [date] wrote:"
-                                  /\r?\n\s*From:\s+.*$/i,                     // "From:"
-                                  /\r?\n\s*-\s*Original\s+Message.*$/i,       // "- Original Message"
-                                ]
-                                
-                                // Find the first reply marker
-                                let replyStartIndex = -1
-                                for (const marker of replyMarkers) {
-                                  const match = cleanBody.match(marker)
-                                  if (match && match.index !== undefined) {
-                                    // Make sure there's content before the marker
-                                    const beforeMarker = cleanBody.substring(0, match.index).trim()
-                                    if (beforeMarker.length > 0) {
-                                      replyStartIndex = match.index
-                                      break
-                                    }
-                                  }
-                                }
-                                
-                                // Cut off everything from the reply marker onwards
-                                if (replyStartIndex > 0) {
-                                  cleanBody = cleanBody.substring(0, replyStartIndex).trim()
-                                }
-                                
-                                // Also remove any standalone quoted lines (starting with >)
-                                // but be careful - only remove if they're clearly part of a quoted block
-                                const lines = cleanBody.split(/\r?\n/)
-                                const cleanedLines = []
-                                let consecutiveQuotedLines = 0
-                                
-                                for (let i = 0; i < lines.length; i++) {
-                                  const line = lines[i]
-                                  const isQuoted = /^\s*>\s*/.test(line)
-                                  
-                                  if (isQuoted) {
-                                    consecutiveQuotedLines++
-                                    // If we have 2+ consecutive quoted lines, skip them all
-                                    if (consecutiveQuotedLines >= 2) {
-                                      continue
-                                    }
-                                  } else {
-                                    consecutiveQuotedLines = 0
-                                    cleanedLines.push(line)
-                                  }
-                                }
-                                
-                                cleanBody = cleanedLines.join('\n').trim()
-                                
-                                // Final fallback: if cleaning removed too much, use original
-                                // But still try to remove obvious quoted sections
-                                if (!cleanBody || cleanBody.length < 5) {
-                                  // Use original but remove the most obvious quoted section
-                                  const original = email.body || ''
-                                  const onWroteMatch = original.match(/\r?\n\s*On\s+.*?wrote:.*$/s)
-                                  if (onWroteMatch && onWroteMatch.index > 10) {
-                                    cleanBody = original.substring(0, onWroteMatch.index).trim()
-                                  } else {
-                                    cleanBody = original.trim()
-                                  }
-                                }
-                                
-                                // Format timestamp
-                                const timestamp = new Date(email.timestamp || email.date)
-                                const timeStr = timestamp.toLocaleTimeString('en-US', { 
-                                  hour: 'numeric', 
-                                  minute: '2-digit',
-                                  hour12: true 
-                                })
-                                const dateStr = timestamp.toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric'
-                                })
-                                const isToday = timestamp.toDateString() === new Date().toDateString()
-                                
-                                return (
-                                  <div
-                                    key={index}
-                                    className={`flex ${isFromLawlyAI ? 'justify-end' : 'justify-start'}`}
-                                  >
-                                    <div className={`max-w-[75%] ${isFromLawlyAI ? 'order-2' : 'order-1'}`}>
-                                      <div className={`rounded-2xl px-4 py-2 ${
-                                        isFromLawlyAI
-                                          ? 'bg-[#8B9D7F] text-white rounded-br-sm'
-                                          : 'bg-gray-200 text-gray-900 rounded-bl-sm'
-                                      }`}>
-                                        {/* Sender name for lawyer messages */}
-                                        {!isFromLawlyAI && (
-                                          <p className="text-xs font-semibold mb-1 opacity-80">
-                                            {senderName}
-                                          </p>
-                                        )}
-                                        
-                                        {/* Message content */}
-                                        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                                          {cleanBody}
-                                        </div>
-                                        
-                                        {/* Timestamp */}
-                                        <p className={`text-xs mt-1 ${
-                                          isFromLawlyAI ? 'text-white/70' : 'text-gray-600'
-                                        }`}>
-                                          {isToday ? timeStr : `${dateStr} ${timeStr}`}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-
-                          {/* Phone Call Alert */}
-                          {thread?.threads?.[0] && thread.threads[0].phone_call_requested && (
-                            <div className="mt-6 border-t pt-4">
-                              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded">
-                                <div className="flex items-center">
-                                  <Phone className="w-5 h-5 text-yellow-600 mr-2" />
-                                  <div>
-                                    <p className="font-semibold text-yellow-800">Phone Call Requested</p>
-                                    <p className="text-sm text-yellow-700">The lawyer has requested a phone call to discuss further.</p>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )
-              })}
+              {displayLawyers.length > 0
+                ? displayLawyers.map((lawyer) => renderLawyerCard(lawyer))
+                : (
+                  <p className="text-center text-gray-600">
+                    Waiting for lawyers to reply...
+                  </p>
+                )}
             </div>
+
+            {hasDemoLawyers && (
+              <div className="max-w-5xl mx-auto space-y-6 mt-12">
+                <div>
+                  <h2 className="text-3xl font-bold text-black mb-2">
+                    Demo Lawyers (Live Email Test)
+                  </h2>
+                  <p className="text-gray-600">
+                    These demo inboxes show the exact email our agent just sent so you can preview the full experience.
+                  </p>
+                </div>
+                {backendDemoLawyers.map((lawyer) => renderLawyerCard(lawyer, { isDemo: true }))}
+              </div>
+            )}
           </div>
         )}
       </div>

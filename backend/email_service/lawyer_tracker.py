@@ -38,6 +38,12 @@ class LawyerOffer:
     email_count: int = 0
     thread_id: str = ""
     location: str = ""  # City, State or full address
+    price_value: Optional[float] = None
+    price_text: str = ""
+    years_experience: Optional[int] = None  # Extracted from recent messages
+    experience_text: str = ""
+    location_text: str = ""
+    rank_score: Optional[int] = None
     
     def __post_init__(self):
         if self.case_types is None:

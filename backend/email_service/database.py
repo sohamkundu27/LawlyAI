@@ -89,6 +89,13 @@ class Lawyer(Base):
     email_count = Column(Integer, default=0)
     thread_id = Column(String)
     location = Column(String)  # City, State or full address
+    # Extracted facts from live email parsing (optional; we only fill these once)
+    price_value = Column(Float)  # Normalized numeric representation for ranking
+    price_text = Column(String)  # Raw snippet describing pricing
+    years_experience = Column(Integer)  # Extracted years from emails (kept separate from experience_years)
+    experience_text = Column(String)
+    location_text = Column(String)
+    rank_score = Column(Integer)  # 0-100 score computed from price_value + years_experience
 
 
 class ProcessedEmail(Base):

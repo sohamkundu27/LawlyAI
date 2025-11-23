@@ -102,6 +102,15 @@ export default function LawyerResultsWithPolling() {
       {lawyersData.lawyers.map((lawyer) => {
         const thread = lawyerThreads[lawyer.lawyer_email]
         const emails = thread?.threads?.[0]?.emails || []
+        const mailtoLink = lawyer.lawyer_email ? `mailto:${lawyer.lawyer_email}` : null
+        const priceText = lawyer.price_text
+          || (lawyer.flat_fee ? `$${lawyer.flat_fee.toLocaleString()} flat fee`
+            : lawyer.hourly_rate ? `$${lawyer.hourly_rate}/hr`
+            : lawyer.contingency_rate ? `${lawyer.contingency_rate}% contingency`
+            : 'N/A')
+        const yearsExperience = lawyer.years_experience ?? lawyer.experience_years
+        const experienceLabel = yearsExperience ? `${yearsExperience} years` : 'N/A'
+        const locationLabel = lawyer.location_text || lawyer.location || 'N/A'
 
         return (
           <Card key={lawyer.lawyer_email} className="border-2 border-[#8B9D7F] shadow-md">
@@ -111,22 +120,35 @@ export default function LawyerResultsWithPolling() {
                   <CardTitle className="text-2xl text-black mb-2">
                     {lawyer.lawyer_name || lawyer.lawyer_email}
                   </CardTitle>
+                  {lawyer.lawyer_email && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                      <Mail className="w-4 h-4" />
+                      <a
+                        href={mailtoLink}
+                        className="underline break-all"
+                        rel="noreferrer"
+                      >
+                        {lawyer.lawyer_email}
+                      </a>
+                    </div>
+                  )}
                   {lawyer.firm_name && (
                     <p className="text-[#8B9D7F] font-semibold text-lg mb-3">
                       {lawyer.firm_name}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-3 mb-3">
+                    {(lawyer.rank_score || 0) > 0 && (
+                      <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">
+                        Score: {lawyer.rank_score}%
+                      </Badge>
+                    )}
                     {lawyer.experience_years && (
                       <Badge variant="secondary" className="flex items-center gap-1">
                         <Briefcase className="w-4 h-4" />
                         {lawyer.experience_years} years
                       </Badge>
                     )}
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      <Mail className="w-4 h-4" />
-                      {lawyer.lawyer_email}
-                    </Badge>
                     {lawyer.flat_fee && (
                       <Badge className="bg-[#8B9D7F] text-white">
                         ${lawyer.flat_fee.toLocaleString()} flat fee
@@ -150,6 +172,18 @@ export default function LawyerResultsWithPolling() {
                       ))}
                     </div>
                   )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm text-gray-600 mb-3">
+                    <div>
+                      <span className="font-semibold text-black">Price:</span> {priceText || 'N/A'}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-black">Experience:</span> {experienceLabel}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <MapPin className="w-4 h-4" />
+                      <span>{locationLabel || 'N/A'}</span>
+                    </div>
+                  </div>
                   <div className="text-sm text-gray-600">
                     <p>Emails exchanged: {lawyer.email_count || 0}</p>
                     {lawyer.last_contact_date && (

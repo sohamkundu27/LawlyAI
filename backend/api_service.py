@@ -229,7 +229,13 @@ def get_all_lawyers():
             "last_contact_date": lawyer.last_contact_date,
             "email_count": lawyer.email_count,
             "thread_id": lawyer.thread_id,
-            "location": lawyer.location
+            "location": lawyer.location,
+            "price_value": lawyer.price_value,
+            "price_text": lawyer.price_text or "N/A",
+            "years_experience": lawyer.years_experience,
+            "experience_text": lawyer.experience_text or "",
+            "location_text": lawyer.location_text or "",
+            "rank_score": lawyer.rank_score or 0
         }
         lawyers_data.append(lawyer_dict)
     
@@ -246,18 +252,7 @@ def get_ranked_lawyers(
     user_location: Optional[str] = None
 ):
     """
-    Get lawyers ranked by three metrics:
-    1. Quote for service (pricing - lower is better)
-    2. Years of experience (higher is better)
-    3. Location-based (closer is better)
-    
-    Args:
-        case_type: Optional case type filter (e.g., "personal injury")
-        max_price: Optional maximum price filter
-        user_location: Optional user location for location-based ranking (e.g., "New York, NY")
-    
-    Returns:
-        List of ranked lawyers with scoring breakdown
+    Get lawyers ranked by extracted price + experience data (falling back to match ordering).
     """
     if lawyer_tracker is None:
         raise HTTPException(status_code=503, detail="Lawyer tracker not initialized")
@@ -269,11 +264,8 @@ def get_ranked_lawyers(
         user_location=user_location
     )
     
-    # Calculate scores for each lawyer
-    all_lawyers = lawyer_tracker.get_all_lawyers()
     lawyers_data = []
     for lawyer in ranked_lawyers:
-        score_data = lawyer_tracker._calculate_ranking_score(lawyer, all_lawyers, user_location)
         lawyer_dict = {
             "lawyer_name": lawyer.lawyer_name,
             "lawyer_email": lawyer.lawyer_email,
@@ -293,23 +285,19 @@ def get_ranked_lawyers(
             "email_count": lawyer.email_count,
             "thread_id": lawyer.thread_id,
             "location": lawyer.location,
-            "ranking": {
-                "total_score": round(score_data['total_score'], 3),
-                "price_score": round(score_data['price_score'], 3),
-                "experience_score": round(score_data['experience_score'], 3),
-                "location_score": round(score_data['location_score'], 3)
-            }
+            "price_value": lawyer.price_value,
+            "price_text": lawyer.price_text or "N/A",
+            "years_experience": lawyer.years_experience,
+            "experience_text": lawyer.experience_text or "",
+            "location_text": lawyer.location_text or "",
+            "rank_score": lawyer.rank_score or 0
         }
         lawyers_data.append(lawyer_dict)
     
     return {
         "lawyers": lawyers_data,
         "count": len(lawyers_data),
-        "ranking_metrics": {
-            "price_weight": 0.40,
-            "experience_weight": 0.35,
-            "location_weight": 0.25
-        }
+        "ranking_method": "price_experience_rank_score_with_location_fallback"
     }
 
 
@@ -469,13 +457,15 @@ def start_lawyer_search(request: StartSearchRequest):
             detail="Email agent not initialized. Check GEMINI_API_KEY environment variable."
         )
     
-    # Hardcoded lawyer emails from example_lawyer_communication.py
-    lawyer_emails = [
-        "sohamkundu2704@gmail.com",
-        "jaybalu06@gmail.com",
-        "arnavmohanty123@gmail.com"
-    ]
+    # DEPRECATED: This endpoint now expects caller-provided lawyer_emails.
+    if not request.lawyer_emails:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint is deprecated and no longer uses hardcoded test emails. "
+                   "Provide lawyer_emails explicitly or use the unified /search-legal flow."
+        )
     
+    lawyer_emails = [e.strip() for e in request.lawyer_emails if e and e.strip()]
     situation = request.situation or ""
     
     # Set up initial message based on situation

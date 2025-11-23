@@ -100,7 +100,7 @@ def search_legal(request: SearchRequest):
         # 2. Extract Lawyers using Gemini
         # This returns a flat list of unique lawyers found across all documents
         all_extracted_lawyers = extract_lawyers_from_search_results(
-            query=request.query,
+            user_situation=request.query,
             search_results=results
         )
         

@@ -1,4 +1,3 @@
-import requests
 import re
 import logging
 from typing import Optional, Tuple, List, Dict, Any
@@ -91,52 +90,12 @@ def find_best_email_for_lawyer(full_name: str, firm: Optional[str] = None) -> Tu
     """
     if not full_name:
         return None, None
-
-    # Step 1: Apollo Person Search
-    try:
-        person_url = "https://api.apollo.io/v1/people/search"
-        
-        payload = {
-            "api_key": APOLLO_API_KEY,
-            "q_person_name": full_name,
-            "page": 1,
-            "per_page": 1
-        }
-        
-        if firm:
-            payload["q_organization_name"] = firm
-            payload["q_keywords"] = f"{full_name} {firm}"
-        else:
-            payload["q_keywords"] = full_name
-
-        headers = {
-            "Content-Type": "application/json"
-        }
-
-        response = requests.post(person_url, json=payload, headers=headers, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-
-        # Look for people, contacts, or prospects
-        people = data.get("people") or data.get("contacts") or data.get("prospects") or []
-        
-        if people:
-            person = people[0]
-            # Try to extract email in order
-            email = (
-                person.get("email") or 
-                person.get("email_address") or 
-                person.get("person_email")
-            )
-            
-            if email:
-                return email, "apollo_person"
-                
-    except Exception as e:
-        # Log error without exposing secrets
-        print(f"Apollo person search error for {full_name} ({firm or 'No Firm'}): {type(e).__name__}")
-        # Fall through to fallbacks
-
+    
+    # NOTE: Apollo lookup intentionally disabled to save latency / quota.
+    # The block below is left for reference but commented out.
+    # try:
+    #     ...
+    
     # Step 2: Fallback Logic (Firm Domain or Gmail)
     first_name, last_name = split_name(full_name)
     

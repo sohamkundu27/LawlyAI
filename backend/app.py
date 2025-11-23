@@ -11,7 +11,7 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +44,24 @@ conversation_manager: Optional[ConversationManagerDB] = None
 lawyer_tracker: Optional[LawyerTrackerDB] = None
 email_agent = None
 listener_thread = None
+
+DEMO_LAWYERS = [
+    {
+        "name": "Soham Kundu (Demo)",
+        "email": "sohamkundu2704@gmail.com",
+        "firm": "Demo Law Group",
+    },
+    {
+        "name": "Jayanth Balu (Demo)",
+        "email": "jaybalu06@gmail.com",
+        "firm": "Demo Law Group",
+    },
+    {
+        "name": "Arnav Mohanty (Demo)",
+        "email": "arnavmohanty123@gmail.com",
+        "firm": "Demo Law Group",
+    },
+]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -153,21 +171,10 @@ class ContactRequest(BaseModel):
 
 # --- Helper Functions ---
 
-def send_initial_outreach(lawyer_emails: List[str], situation: str) -> Dict[str, Any]:
-    """
-    Helper to send initial emails to a list of lawyers using the global email agent.
-    Handles database tracking for the new threads.
-    """
-    global email_agent, conversation_manager, lawyer_tracker
-    
-    if not email_agent:
-        raise ValueError("Email agent not initialized")
-    if not conversation_manager or not lawyer_tracker:
-        raise ValueError("Database services not initialized")
-
-    # Setup the message
-    initial_subject = "Legal Consultation Inquiry"
-    initial_message = f"""Hello,
+def build_initial_email_content(situation: str) -> Tuple[str, str]:
+    """Return the standard initial outreach subject/body."""
+    subject = "Legal Consultation Inquiry"
+    body = f"""Hello,
 
 I hope this email finds you well. I am reaching out to inquire about your legal services and would appreciate the opportunity to discuss my legal needs with you.
 
@@ -183,6 +190,22 @@ Could you please provide information about:
 Thank you for your time and consideration. I look forward to hearing from you.
 
 Best regards"""
+    return subject, body
+
+
+def send_initial_outreach(lawyer_emails: List[str], situation: str) -> Dict[str, Any]:
+    """
+    Helper to send initial emails to a list of lawyers using the global email agent.
+    Handles database tracking for the new threads.
+    """
+    global email_agent, conversation_manager, lawyer_tracker
+    
+    if not email_agent:
+        raise ValueError("Email agent not initialized")
+    if not conversation_manager or not lawyer_tracker:
+        raise ValueError("Database services not initialized")
+
+    initial_subject, initial_message = build_initial_email_content(situation)
 
     # Configure Agent
     email_agent.set_lawyer_emails(lawyer_emails)
@@ -242,6 +265,136 @@ Best regards"""
         "results": results
     }
 
+
+def _start_initial_emails_for_lawyers_async(lawyers: List[Dict[str, Any]], user_situation: str) -> None:
+    """
+    Fire-and-forget helper to send initial outreach emails to a list of enriched lawyers.
+    Uses the existing send_initial_outreach + ConversationManagerDB / LawyerTrackerDB path.
+    
+    This runs in a background thread so /search-legal can return quickly.
+    """
+    def _worker():
+        global email_agent, conversation_manager, lawyer_tracker
+        try:
+            if not email_agent or not conversation_manager or not lawyer_tracker:
+                print("⚠️  Initial email outreach skipped (services not initialized).")
+                return
+            
+            valid_emails = []
+            seen = set()
+            for lawyer in lawyers:
+                email = (lawyer.get("email") or "").strip().lower()
+                if not email:
+                    continue
+                if "@" not in email:
+                    continue
+                local, _, domain = email.partition("@")
+                if not local or not domain or "." not in domain:
+                    continue
+                if email in seen:
+                    continue
+                seen.add(email)
+                valid_emails.append(email)
+            
+            if not valid_emails:
+                print("INFO: No valid lawyer emails found for initial outreach.")
+                return
+            
+            print(f"Skipping real email sending for {len(valid_emails)} lawyer(s); UI-only seeding is active.")
+            # Placeholder for future: send_initial_outreach(valid_emails, user_situation)
+        except Exception as e:
+            print(f"❌ Error in background initial outreach: {e}")
+    
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+
+def seed_initial_conversations_for_lawyers(lawyers: List[Dict[str, Any]], user_situation: str) -> None:
+    """
+    Create an initial EmailThread + EmailMessage for each enriched lawyer
+    without actually sending an email.
+    """
+    global conversation_manager, lawyer_tracker
+    if not conversation_manager or not lawyer_tracker:
+        print("⚠️  Conversation or lawyer tracker not initialized; cannot seed initial emails.")
+        return
+    
+    subject, message = build_initial_email_content(user_situation)
+    sender_email = os.getenv("SENDER_EMAIL", "").strip() or "client@lawlyai.com"
+    
+    seen = set()
+    for lawyer in lawyers:
+        email = (lawyer.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            continue
+        local, _, domain = email.partition("@")
+        if not local or not domain or "." not in domain:
+            continue
+        if email in seen:
+            continue
+        seen.add(email)
+        
+        email_data = {
+            'from': sender_email,
+            'to': email,
+            'subject': subject,
+            'body': message,
+            'date': datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z'),
+            'uid': '',
+            'message_id': '',
+            'in_reply_to': '',
+            'references': ''
+        }
+        
+        try:
+            thread_id = conversation_manager.add_email(email_data)
+            lawyer_tracker.create_lawyer(
+                lawyer_email=email,
+                lawyer_name=lawyer.get("name", "") or lawyer.get("lawyer_name", ""),
+                    thread_id=thread_id,
+                    firm_name=lawyer.get("firm_name", "") or lawyer.get("firm", "")
+            )
+        except Exception as e:
+            print(f"⚠️  Failed to seed initial conversation for {email}: {e}")
+
+
+def start_demo_lawyer_conversations(user_situation: str) -> None:
+    """
+    Ensure demo lawyers exist in the database and send initial outreach emails.
+    """
+    global email_agent, conversation_manager, lawyer_tracker
+    
+    if not email_agent or not conversation_manager or not lawyer_tracker:
+        print("⚠️  Demo lawyer outreach skipped (services not initialized).")
+        return
+    
+    demo_emails = [
+        demo["email"] for demo in DEMO_LAWYERS
+        if demo.get("email")
+    ]
+    
+    if not demo_emails:
+        return
+    
+    try:
+        send_initial_outreach(demo_emails, user_situation)
+    except Exception as outreach_error:
+        print(f"⚠️  Failed to send demo lawyer outreach: {outreach_error}")
+    
+    for demo in DEMO_LAWYERS:
+        email_value = (demo.get("email") or "").strip().lower()
+        if not email_value:
+            continue
+        try:
+            lawyer_tracker.create_lawyer(
+                lawyer_email=email_value,
+                lawyer_name=demo.get("name", ""),
+                thread_id="",
+                firm_name=demo.get("firm", "")
+            )
+        except Exception as ensure_error:
+            print(f"⚠️  Failed to ensure demo lawyer {email_value}: {ensure_error}")
+
 # --- Endpoints ---
 
 @app.get("/health")
@@ -271,7 +424,7 @@ def search_legal(request: SearchRequest):
         
         # 2. Extract Lawyers (Gemini)
         all_extracted_lawyers = extract_lawyers_from_search_results(
-            query=request.query,
+            user_situation=request.query,
             search_results=results
         )
         
@@ -289,6 +442,26 @@ def search_legal(request: SearchRequest):
                     l for l in all_extracted_lawyers 
                     if l.get("document_id") == res_id
                 ]
+        
+        # 5. Seed synthetic initial emails so conversations show the first message immediately
+        try:
+            threading.Thread(
+                target=seed_initial_conversations_for_lawyers,
+                args=(all_extracted_lawyers, request.query),
+                daemon=True
+            ).start()
+        except Exception as outreach_error:
+            # Do not fail search if outreach fails; just log
+            print(f"⚠️  Failed to seed initial conversations from /search-legal: {outreach_error}")
+        
+        try:
+            threading.Thread(
+                target=start_demo_lawyer_conversations,
+                args=(request.query,),
+                daemon=True
+            ).start()
+        except Exception as demo_error:
+            print(f"⚠️  Failed to start demo lawyer conversations: {demo_error}")
         
         return results
         
@@ -380,7 +553,13 @@ def get_all_lawyers():
             "last_contact_date": lawyer.last_contact_date,
             "email_count": lawyer.email_count,
             "thread_id": lawyer.thread_id,
-            "location": lawyer.location
+            "location": lawyer.location,
+            "price_value": lawyer.price_value,
+            "price_text": lawyer.price_text or "N/A",
+            "years_experience": lawyer.years_experience,
+            "experience_text": lawyer.experience_text or "",
+            "location_text": lawyer.location_text or "",
+            "rank_score": lawyer.rank_score or 0
         }
         lawyers_data.append(lawyer_dict)
     
@@ -401,10 +580,8 @@ def get_ranked_lawyers(
         user_location=user_location
     )
     
-    all_lawyers = lawyer_tracker.get_all_lawyers()
     lawyers_data = []
     for lawyer in ranked_lawyers:
-        score_data = lawyer_tracker._calculate_ranking_score(lawyer, all_lawyers, user_location)
         lawyer_dict = {
             "lawyer_name": lawyer.lawyer_name,
             "lawyer_email": lawyer.lawyer_email,
@@ -424,23 +601,19 @@ def get_ranked_lawyers(
             "email_count": lawyer.email_count,
             "thread_id": lawyer.thread_id,
             "location": lawyer.location,
-            "ranking": {
-                "total_score": round(score_data['total_score'], 3),
-                "price_score": round(score_data['price_score'], 3),
-                "experience_score": round(score_data['experience_score'], 3),
-                "location_score": round(score_data['location_score'], 3)
-            }
+            "price_value": lawyer.price_value,
+            "price_text": lawyer.price_text or "N/A",
+            "years_experience": lawyer.years_experience,
+            "experience_text": lawyer.experience_text or "",
+            "location_text": lawyer.location_text or "",
+            "rank_score": lawyer.rank_score or 0
         }
         lawyers_data.append(lawyer_dict)
     
     return {
         "lawyers": lawyers_data,
         "count": len(lawyers_data),
-        "ranking_metrics": {
-            "price_weight": 0.40,
-            "experience_weight": 0.35,
-            "location_weight": 0.25
-        }
+        "ranking_method": "price_experience_rank_score_with_location_fallback"
     }
 
 @app.get("/api/conversations/updated-since/{timestamp}")

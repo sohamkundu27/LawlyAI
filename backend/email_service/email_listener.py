@@ -440,6 +440,18 @@ def process_emails(agent, conversation_manager=None, lawyer_tracker=None, auto_r
                     print(f"           Hourly: ${lawyer.hourly_rate:,.2f}/hr")
                 elif lawyer.contingency_rate:
                     print(f"           Contingency: {lawyer.contingency_rate}%")
+            
+            # Update fact extraction + ranking if the tracker supports it
+            if hasattr(lawyer_tracker, "update_lawyer_facts_from_message"):
+                try:
+                    updated = lawyer_tracker.update_lawyer_facts_from_message(
+                        from_email,
+                        email_data.get('body', '')
+                    )
+                    if updated:
+                        print("  [LAWYER] Updated extracted facts from this message.")
+                except Exception as fact_err:
+                    print(f"  [WARNING] Failed to update lawyer facts: {fact_err}")
         
         print(f"  Body preview: {email_data['body'][:100]}..." if len(email_data['body']) > 100 else f"  Body: {email_data['body']}")
         
