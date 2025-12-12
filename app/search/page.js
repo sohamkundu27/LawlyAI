@@ -14,7 +14,7 @@ import { fetchLawyers, fetchLawyerConversation, fetchStats, startLawyerSearch, f
 // Hardcoded lawyer emails (matching backend)
 const LAWYER_EMAILS = [
   "sohamkundu2704@gmail.com",
-  "jaybalu06@gmail.com",
+  "womovo6376@bablace.com",
   "arnavmohanty123@gmail.com"
 ]
 
@@ -346,7 +346,7 @@ export default function SearchPage() {
                               {lawyer.experience_years} years experience
                             </div>
                           )}
-                          <div className="pt-2 border-t border-gray-200">
+                          <div className="pt-2 border-t border-gray-200 space-y-1">
                             {lawyer.flat_fee && (
                               <p className="text-sm font-semibold text-[#8B9D7F]">
                                 Flat Fee: ${lawyer.flat_fee.toLocaleString()}
@@ -360,6 +360,16 @@ export default function SearchPage() {
                             {lawyer.estimated_total && (
                               <p className="text-sm text-gray-600">
                                 Est. Total: ${lawyer.estimated_total.toLocaleString()}
+                              </p>
+                            )}
+                            {lawyer.retainer_amount && (
+                              <p className="text-sm text-gray-600">
+                                Retainer: ${lawyer.retainer_amount.toLocaleString()}
+                              </p>
+                            )}
+                            {lawyer.contingency_rate && (
+                              <p className="text-sm text-gray-600">
+                                Contingency: {lawyer.contingency_rate}%
                               </p>
                             )}
                           </div>
@@ -450,32 +460,57 @@ export default function SearchPage() {
                             </p>
                           )}
                           <div className="flex flex-wrap gap-3 mb-3">
+                            {lawyer.location && (
+                              <Badge variant="secondary" className="flex items-center gap-1">
+                                <MapPin className="w-4 h-4" />
+                                {lawyer.location}
+                              </Badge>
+                            )}
                             {lawyer.experience_years && (
                               <Badge variant="secondary" className="flex items-center gap-1">
                                 <Briefcase className="w-4 h-4" />
-                                {lawyer.experience_years} years
+                                {lawyer.experience_years} years experience
                               </Badge>
                             )}
                             <Badge variant="secondary" className="flex items-center gap-1">
                               <Mail className="w-4 h-4" />
                               {lawyer.lawyer_email}
                             </Badge>
-                            {lawyer.flat_fee && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                ${lawyer.flat_fee.toLocaleString()} flat fee
-                              </Badge>
-                            )}
-                            {lawyer.hourly_rate && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                ${lawyer.hourly_rate}/hr
-                              </Badge>
-                            )}
-                            {lawyer.contingency_rate && (
-                              <Badge className="bg-[#8B9D7F] text-white">
-                                {lawyer.contingency_rate}% contingency
-                              </Badge>
-                            )}
                           </div>
+                          
+                          {/* Pricing Information */}
+                          {(lawyer.flat_fee || lawyer.hourly_rate || lawyer.estimated_total || lawyer.retainer_amount || lawyer.contingency_rate) && (
+                            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                              <p className="text-sm font-semibold text-gray-700 mb-2">Pricing:</p>
+                              <div className="flex flex-wrap gap-2">
+                                {lawyer.flat_fee && (
+                                  <Badge className="bg-[#8B9D7F] text-white">
+                                    Flat Fee: ${lawyer.flat_fee.toLocaleString()}
+                                  </Badge>
+                                )}
+                                {lawyer.hourly_rate && (
+                                  <Badge className="bg-[#8B9D7F] text-white">
+                                    ${lawyer.hourly_rate}/hr
+                                  </Badge>
+                                )}
+                                {lawyer.estimated_total && (
+                                  <Badge className="bg-[#8B9D7F] text-white">
+                                    Est. Total: ${lawyer.estimated_total.toLocaleString()}
+                                  </Badge>
+                                )}
+                                {lawyer.retainer_amount && (
+                                  <Badge className="bg-[#8B9D7F] text-white">
+                                    Retainer: ${lawyer.retainer_amount.toLocaleString()}
+                                  </Badge>
+                                )}
+                                {lawyer.contingency_rate && (
+                                  <Badge className="bg-[#8B9D7F] text-white">
+                                    {lawyer.contingency_rate}% contingency
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          )}
                           {lawyer.case_types && lawyer.case_types.length > 0 && (
                             <div className="flex flex-wrap gap-2 mb-3">
                               {lawyer.case_types.map((type, idx) => (
@@ -483,10 +518,13 @@ export default function SearchPage() {
                               ))}
                             </div>
                           )}
-                          <div className="text-sm text-gray-600">
+                          <div className="text-sm text-gray-600 space-y-1">
                             <p>Emails exchanged: {lawyer.email_count || 0}</p>
                             {lawyer.last_contact_date && (
                               <p>Last contact: {new Date(lawyer.last_contact_date).toLocaleString()}</p>
+                            )}
+                            {!lawyer.location && !lawyer.experience_years && !lawyer.flat_fee && !lawyer.hourly_rate && !lawyer.estimated_total && (
+                              <p className="text-xs text-gray-400 italic">Waiting for lawyer to provide details...</p>
                             )}
                           </div>
                         </div>

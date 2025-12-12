@@ -40,9 +40,7 @@ def main():
     # Example: Set lawyer emails
     # Replace these with actual lawyer email addresses
     lawyer_emails = [
-        "sohamkundu2704@gmail.com",
-        "jaybalu06@gmail.com",
-        "arnavmohanty123@gmail.com"
+        "jaybalu06@gmail.com"
     ]
     
     # Optional: Customize initial message

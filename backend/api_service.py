@@ -467,7 +467,7 @@ def start_lawyer_search(request: StartSearchRequest):
     # Hardcoded lawyer emails from example_lawyer_communication.py
     lawyer_emails = [
         "sohamkundu2704@gmail.com",
-        "jaybalu06@gmail.com",
+        "womovo6376@bablace.com",
         "arnavmohanty123@gmail.com"
     ]
     

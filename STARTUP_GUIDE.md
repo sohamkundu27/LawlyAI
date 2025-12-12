@@ -95,7 +95,7 @@ You should see:
    - Call the backend API
    - Send emails to the 3 hardcoded lawyers:
      - sohamkundu2704@gmail.com
-     - jaybalu06@gmail.com
+     - womovo6376@bablace.com
      - arnavmohanty123@gmail.com
    - Start the email listener in the background
 5. **Watch for updates**: The page will automatically poll every 5 seconds for:
